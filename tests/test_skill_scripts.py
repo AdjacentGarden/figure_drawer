@@ -93,6 +93,27 @@ class SkillScriptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(json.loads((tmp / "report.json").read_text(encoding="utf-8"))["missing_labels"], ["V"])
 
+    def test_builtin_reference_import_records_no_unverified_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            source = tmp / "tool-output.png"
+            source.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "import_builtin_reference.py"),
+                    "--source", str(source),
+                    "--out", str(tmp / "run" / "reference.png"),
+                    "--record", str(tmp / "run" / "provenance.json"),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            provenance = json.loads((tmp / "run" / "provenance.json").read_text(encoding="utf-8"))
+            self.assertEqual(provenance["backend"], "builtin-imagegen")
+            self.assertIsNone(provenance["model_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

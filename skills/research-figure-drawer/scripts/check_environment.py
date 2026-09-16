@@ -76,10 +76,15 @@ def main() -> int:
             "path": editppt,
             "doctor": run_doctor(editppt) if editppt else None,
         },
-        "exact_image_model": {
-            "model": "gpt-image-2",
-            "selection_method": "editppt image generate --model gpt-image-2",
-            "authentication_note": "Codex OAuth or an OpenAI-compatible API credential is required at generation time.",
+        "reference_image_backend": {
+            "default": "builtin image_gen.imagegen",
+            "api_key_required": False,
+            "runtime_note": "The agent must verify that the built-in image generation tool is callable in the current GPT/Codex client.",
+            "optional_exact_model_fallback": {
+                "model": "gpt-image-2",
+                "selection_method": "editppt image generate --model gpt-image-2",
+                "authentication_note": "Codex OAuth or an OpenAI-compatible API credential may be required only for this optional path.",
+            },
         },
     }
     report["ok"] = bool(dependency and editppt)

@@ -2,7 +2,7 @@
 
 An installable Codex/GPT client skill that turns scientific LaTeX, TikZ, architecture descriptions, and method workflows into:
 
-- a publication-ready reference figure generated with `gpt-image-2`; and
+- a publication-ready reference figure generated with the GPT/Codex client's built-in image tool; and
 - a validated, object-level editable PowerPoint figure.
 
 The workflow uses a structured scientific specification as the source of truth, then delegates object-level PowerPoint reconstruction to [`image-to-editable-ppt`](https://github.com/ningzimu/image-to-editable-ppt-skill).
@@ -18,7 +18,7 @@ TeX / TikZ / method description
         ↓
 figure_spec.json — authoritative labels, formulas, modules, and edges
         ↓
-GPT Image 2 — polished reference PNG
+client built-in image generation — polished reference PNG
         ↓
 image-to-editable-ppt — native text, shapes, paths, tables, and independent assets
         ↓
@@ -49,7 +49,7 @@ If the dependency CLI is not available, follow its current setup instructions an
 editppt doctor
 ```
 
-Exact image-model selection uses `editppt image generate --model gpt-image-2`. It requires supported Codex OAuth or an OpenAI-compatible API credential. The model is documented by [OpenAI](https://developers.openai.com/api/docs/models/gpt-image-2).
+The default path uses the client-provided `image_gen.imagegen` tool and therefore does not require an API key. [ChatGPT Pro includes image creation](https://help.openai.com/en/articles/9793128-what-is-chatgpt-pro/), subject to separate plan and tool limits. Exact [`gpt-image-2`](https://developers.openai.com/api/docs/models/gpt-image-2) API selection remains available as an optional fallback and may require Codex OAuth or `OPENAI_API_KEY`.
 
 ## Usage
 
@@ -86,6 +86,7 @@ tests/
 - Complex illustrations and semantic icons may remain independent raster assets; their internal strokes are not necessarily editable.
 - LaTeX-rendered formulas are independently movable but are not automatically native PowerPoint equations.
 - The image and OCR stages may use external services. Mark confidential work as local-only before invoking the skill; the GPT Image stage cannot then proceed as specified.
+- The built-in image tool does not expose a model selector. The skill accurately records it as client-built-in generation rather than claiming an unverified API model ID.
 
 ## Development
 

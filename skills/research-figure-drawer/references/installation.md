@@ -25,11 +25,13 @@ pipx install --force --editable <image-to-editable-ppt-skill-root>/cli
 editppt doctor
 ```
 
-## Authentication
+## Image generation and authentication
 
-Exact `gpt-image-2` selection uses `editppt image generate --model gpt-image-2`. The CLI first attempts supported Codex OAuth and otherwise uses a configured OpenAI-compatible API. Never commit API keys to this repository or a figure run directory.
+The default workflow calls the GPT/Codex client's built-in `image_gen.imagegen` tool. It uses the account already signed in to the client and does not require `OPENAI_API_KEY`. Availability and usage limits follow the user's client plan and workspace permissions.
 
-For the API path, configure `OPENAI_API_KEY` or the dependency's user-level configuration. PaddleOCR-VL is optional but recommended by the dependency skill for more accurate text box and font-size hints.
+Exact `gpt-image-2` API selection is an optional fallback, not the default. It uses `editppt image generate --model gpt-image-2`, which may require supported Codex OAuth or a configured OpenAI-compatible API credential. Never commit API keys to this repository or a figure run directory.
+
+PaddleOCR-VL is optional but recommended by the dependency skill for more accurate text box and font-size hints. OCR authentication is separate from reference-image generation.
 
 ## Invocation
 

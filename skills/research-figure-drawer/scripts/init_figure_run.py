@@ -78,6 +78,7 @@ def main() -> int:
             "figure_spec": "figure_spec.json",
             "image_prompt": "imagegen-prompt.md",
             "reference": "reference/reference.png",
+            "reference_provenance": "reference/reference-provenance.json",
             "final_dir": "final",
         },
     }

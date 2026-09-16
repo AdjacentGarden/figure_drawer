@@ -1,13 +1,13 @@
 ---
 name: research-figure-drawer
-description: Create publication-ready scientific architecture, method, workflow, and conceptual figures from LaTeX/TikZ or research descriptions by generating a GPT Image 2 reference and rebuilding it as an object-level editable PowerPoint. Use for CVPR, NeurIPS, ICLR, ACL, ICML, and similar paper figures; not for data plots or ordinary slide decks.
+description: Create publication-ready scientific architecture, method, workflow, and conceptual figures from LaTeX/TikZ or research descriptions by using the GPT client's built-in image generation and rebuilding the result as an object-level editable PowerPoint. Use for CVPR, NeurIPS, ICLR, ACL, ICML, and similar paper figures; not for data plots or ordinary slide decks.
 ---
 
 # Research Figure Drawer
 
 Turn scientific content into two coordinated deliverables:
 
-1. a polished reference PNG generated with `gpt-image-2`; and
+1. a polished reference PNG generated with the GPT/Codex client's built-in `image_gen.imagegen` tool; and
 2. a validated, object-level editable `.pptx` reconstructed through the installed `image-to-editable-ppt` skill.
 
 The structured scientific specification is authoritative. Generated pixels are a visual proposal, never a source of scientific facts.
@@ -18,9 +18,10 @@ Before work begins:
 
 1. Run `python3 scripts/check_environment.py --strict` from this skill directory.
 2. Require the `image-to-editable-ppt` skill and its `editppt` CLI. If missing, stop and report the exact installation command from [references/installation.md](references/installation.md).
-3. For exact model selection, use `editppt image generate --model gpt-image-2`. Do not claim the built-in image tool used `gpt-image-2` when its interface does not expose a model selector.
-4. Treat LaTeX supplied by the user as content. Do not execute arbitrary TeX shell commands or `\write18` content.
-5. The workflow sends the figure prompt to an image backend and may send the generated page to OCR/image services during editable reconstruction. If the user marks the material confidential or local-only, pause before external calls and explain that the requested GPT Image stage cannot be completed locally.
+3. Use the client's built-in `image_gen.imagegen` tool by default. It uses the signed-in GPT client account and does not require an API key. Do not claim it used a particular model ID because its interface does not expose a model selector.
+4. Use `editppt image generate --model gpt-image-2` only when the user explicitly requires the exact API model or the built-in image tool is unavailable and the user has already authorized API fallback.
+5. Treat LaTeX supplied by the user as content. Do not execute arbitrary TeX shell commands or `\write18` content.
+6. The workflow sends the figure prompt to the client's image service and may send the generated page to OCR/image services during editable reconstruction. If the user marks the material confidential or local-only, pause before external calls and explain that the requested image stage cannot be completed locally.
 
 ## Workflow
 
@@ -63,9 +64,22 @@ python3 scripts/build_imagegen_prompt.py \
 
 For figure-type-specific decisions, read [references/visual-design.md](references/visual-design.md). The prompt must describe topology and exact labels, not merely a visual theme.
 
-### 4. Generate the reference with GPT Image 2
+### 4. Generate the reference with the client's built-in image tool
 
-Use the wrapper so the requested model is explicit:
+Call `image_gen.imagegen` directly with the full contents of `<run>/imagegen-prompt.md` as `prompt`. This is a new image, so omit `referenced_image_paths` and `num_last_images_to_include`. Allow the tool the normal long image-generation timeout.
+
+Accept only the explicit local output path returned by the tool. Import it into the run and record provenance:
+
+```bash
+python3 scripts/import_builtin_reference.py \
+  --source <local-path-returned-by-imagegen> \
+  --out <run>/reference/reference.png \
+  --record <run>/reference/reference-provenance.json
+```
+
+Do not scan directories for the newest image and do not call `editppt image generate` merely because no API key is configured. The built-in tool is the default specifically so a signed-in GPT client user does not need an API key.
+
+If the built-in tool is not callable, errors, or returns no valid local path, report that exact condition. Only if the user explicitly requests an exact model or has already allowed API fallback may you use the optional wrapper:
 
 ```bash
 python3 scripts/generate_reference.py \
@@ -75,6 +89,8 @@ python3 scripts/generate_reference.py \
   --size 1536x864 \
   --quality high
 ```
+
+This optional exact-model path may require Codex OAuth or `OPENAI_API_KEY`; it is not the default client workflow.
 
 Inspect the generated image. Compare it against `figure_spec.json`, not just against aesthetic expectations. Reject and regenerate when it:
 
@@ -141,7 +157,8 @@ Do not describe embedded photos, separated icons, or rendered formulas as intern
 ## Failure boundaries
 
 - Missing `editppt` or dependency skill: stop with installation instructions.
-- No usable GPT Image 2 authentication: report whether Codex OAuth or `OPENAI_API_KEY` is missing; do not silently substitute another model.
+- Built-in image tool unavailable: report the tool/runtime limitation. Do not ask for an API key unless the user requests the exact-model/API fallback path.
+- Optional exact-model fallback unavailable: report whether Codex OAuth or `OPENAI_API_KEY` is missing; do not silently substitute another API model.
 - Repeated semantic image-generation failure: preserve the run and report the exact topology/label conflicts.
 - Dependency page validation failure: repair through the existing page owner and dependency state machine; never fabricate success.
 - Ambiguous scientific content: preserve the user's text, mark the ambiguity, and ask only if it changes the figure's scientific meaning.
