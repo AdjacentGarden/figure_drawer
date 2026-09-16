@@ -13,6 +13,7 @@ from xml.etree import ElementTree as ET
 
 NS = {
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
 }
 
 
@@ -29,10 +30,17 @@ def pptx_texts(path: Path) -> tuple[int, list[str]]:
         )
         for slide in slides:
             root = ET.fromstring(archive.read(slide))
-            for paragraph in root.findall(".//a:p", NS):
-                value = "".join(node.text or "" for node in paragraph.findall(".//a:t", NS))
-                if normalize_text(value):
-                    texts.append(normalize_text(value))
+            for text_body in root.findall(".//p:txBody", NS):
+                paragraphs: list[str] = []
+                for paragraph in text_body.findall("./a:p", NS):
+                    value = "".join(node.text or "" for node in paragraph.findall(".//a:t", NS))
+                    normalized = normalize_text(value)
+                    if normalized:
+                        paragraphs.append(normalized)
+                        texts.append(normalized)
+                combined = normalize_text(" ".join(paragraphs))
+                if combined and combined not in texts:
+                    texts.append(combined)
     return len(slides), texts
 
 
