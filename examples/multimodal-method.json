@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "figure_id": "multimodal-method",
+  "figure_type": "multimodal",
+  "title": "",
+  "venue_profile": "cvpr",
+  "canvas": {
+    "aspect_ratio": "16:9",
+    "orientation": "landscape",
+    "reading_direction": "left-to-right"
+  },
+  "scientific_message": "Video and text are encoded independently, aligned through cross-modal attention, and decoded into temporal boundaries and saliency scores.",
+  "groups": [
+    {"id": "encoders", "label": "Modality Encoders", "description": "Parallel video and text feature extraction."},
+    {"id": "decoder", "label": "Temporal Decoder", "description": "Cross-modal reasoning and prediction."}
+  ],
+  "modules": [
+    {"id": "video", "label": "Video", "kind": "input", "group": "encoders", "description": "Sampled video frames.", "visual_hint": "short filmstrip"},
+    {"id": "visual_encoder", "label": "Visual Encoder", "kind": "encoder", "group": "encoders", "description": "Produces temporal visual features.", "visual_hint": "stacked feature maps"},
+    {"id": "query", "label": "Text Query", "kind": "input", "group": "encoders", "description": "Natural-language query.", "visual_hint": "token ribbon"},
+    {"id": "text_encoder", "label": "Text Encoder", "kind": "encoder", "group": "encoders", "description": "Produces token features.", "visual_hint": "token matrix"},
+    {"id": "cross_attention", "label": "Cross-Modal Attention", "kind": "attention", "group": "decoder", "description": "Aligns query and video evidence.", "visual_hint": "attention matrix"},
+    {"id": "prediction", "label": "Boundary + Saliency", "kind": "head", "group": "decoder", "description": "Predicts start/end boundaries and saliency.", "visual_hint": "timeline with highlighted segment"}
+  ],
+  "edges": [
+    {"id": "e1", "from": "video", "to": "visual_encoder", "label": "", "direction": "forward", "style": "primary", "meaning": "visual encoding"},
+    {"id": "e2", "from": "query", "to": "text_encoder", "label": "", "direction": "forward", "style": "primary", "meaning": "text encoding"},
+    {"id": "e3", "from": "visual_encoder", "to": "cross_attention", "label": "V", "direction": "forward", "style": "primary", "meaning": "visual features"},
+    {"id": "e4", "from": "text_encoder", "to": "cross_attention", "label": "Q", "direction": "forward", "style": "conditioning", "meaning": "query features"},
+    {"id": "e5", "from": "cross_attention", "to": "prediction", "label": "", "direction": "forward", "style": "primary", "meaning": "fused representation"}
+  ],
+  "formulas": [],
+  "exact_text": ["Video", "Visual Encoder", "Text Query", "Text Encoder", "Cross-Modal Attention", "Boundary + Saliency", "Modality Encoders", "Temporal Decoder", "V", "Q"],
+  "style": {
+    "tone": "clean publication-ready vector diagram",
+    "palette": ["#4457A6", "#5CA8A8", "#E6B566", "#F5F6F8"],
+    "background": "white",
+    "line_style": "clean orthogonal connectors",
+    "typography": "sans-serif, concise labels",
+    "density": "moderate"
+  },
+  "forbidden": ["invented losses", "unexplained residual connections", "decorative arrows without semantics"],
+  "assumptions": []
+}

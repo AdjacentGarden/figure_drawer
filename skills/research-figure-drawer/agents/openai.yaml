@@ -1,0 +1,9 @@
+interface:
+  display_name: "Research Figure Drawer"
+  short_description: "Turn research descriptions or TeX into editable PPT figures"
+  icon_small: "./assets/figure-drawer.svg"
+  icon_large: "./assets/figure-drawer.svg"
+  brand_color: "#4457A6"
+  default_prompt: "Use $research-figure-drawer to turn my research method description into a publication-ready editable PowerPoint figure."
+policy:
+  allow_implicit_invocation: true
