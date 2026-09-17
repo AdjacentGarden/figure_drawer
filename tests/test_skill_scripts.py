@@ -8,6 +8,9 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
+
+from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +48,8 @@ class SkillScriptTests(unittest.TestCase):
             self.assertTrue((run_dir / "figure_spec.json").is_file())
             self.assertTrue((run_dir / "reference").is_dir())
             self.assertTrue((run_dir / "final").is_dir())
+            figure_spec = json.loads((run_dir / "figure_spec.json").read_text(encoding="utf-8"))
+            self.assertEqual(figure_spec["reconstruction"]["mode"], "reference-guided-hybrid")
 
     def test_final_validation_checks_native_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -52,7 +57,7 @@ class SkillScriptTests(unittest.TestCase):
             spec = {"exact_text": ["Encoder", "Decoder"]}
             (tmp / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
             (tmp / "validation.json").write_text(json.dumps({"passed": True}), encoding="utf-8")
-            slide = """<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><a:p><a:r><a:t>Encoder</a:t></a:r></a:p><a:p><a:r><a:t>Decoder</a:t></a:r></a:p></p:cSld></p:sld>"""
+            slide = """<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Encoder</a:t></a:r></a:p><a:p><a:r><a:t>Decoder</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"""
             with zipfile.ZipFile(tmp / "result.pptx", "w") as archive:
                 archive.writestr("ppt/slides/slide1.xml", slide)
             result = subprocess.run(
@@ -75,7 +80,7 @@ class SkillScriptTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "spec.json").write_text(json.dumps({"exact_text": ["V"]}), encoding="utf-8")
             (tmp / "validation.json").write_text(json.dumps({"passed": True}), encoding="utf-8")
-            slide = """<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><a:p><a:r><a:t>Visual Encoder</a:t></a:r></a:p></p:cSld></p:sld>"""
+            slide = """<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Visual Encoder</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"""
             with zipfile.ZipFile(tmp / "result.pptx", "w") as archive:
                 archive.writestr("ppt/slides/slide1.xml", slide)
             result = subprocess.run(
@@ -113,6 +118,97 @@ class SkillScriptTests(unittest.TestCase):
             provenance = json.loads((tmp / "run" / "provenance.json").read_text(encoding="utf-8"))
             self.assertEqual(provenance["backend"], "builtin-imagegen")
             self.assertIsNone(provenance["model_id"])
+
+    def test_quality_audit_passes_vector_and_readable_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            assets = tmp / "assets"
+            assets.mkdir()
+            (assets / "icon.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/>", encoding="utf-8")
+            manifest = {
+                "slide": {"width": 10, "height": 5.625},
+                "source": {"width_px": 1000, "height_px": 563},
+                "quality_policy": {"min_font_pt": 10, "min_raster_dpi": 300},
+                "text_boxes": [{"text": "Encoder", "font_size": 11, "box_px": [20, 20, 100, 30]}],
+                "images": [{"id": "icon", "path": "assets/icon.svg", "box_px": [20, 60, 40, 40]}],
+                "visual_inventory": [{"id": "icon", "role": "foreground", "path": "assets/icon.svg", "vector_required": True}],
+                "formula_inventory": [{"id": "eq", "image": "assets/icon.svg"}],
+            }
+            (tmp / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "audit_figure_quality.py"), "--manifest", str(tmp / "manifest.json"), "--report", str(tmp / "report.json")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(json.loads((tmp / "report.json").read_text(encoding="utf-8"))["passed"])
+
+    def test_quality_audit_rejects_small_text_low_dpi_and_raster_formula(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            assets = tmp / "assets"
+            assets.mkdir()
+            Image.new("RGBA", (20, 20), "white").save(assets / "icon.png")
+            manifest = {
+                "slide": {"width": 10, "height": 5.625},
+                "source": {"width_px": 1000, "height_px": 563},
+                "quality_policy": {"min_font_pt": 10, "min_raster_dpi": 300, "prefer_vector_formulas": True},
+                "text_boxes": [{"text": "Tiny", "font_size": 8, "box_px": [20, 20, 100, 30]}],
+                "images": [{"id": "icon", "path": "assets/icon.png", "box_px": [20, 60, 100, 100]}],
+                "visual_inventory": [{"id": "icon", "role": "foreground", "path": "assets/icon.png", "vector_required": True}],
+                "formula_inventory": [{"id": "eq", "image": "assets/icon.png"}],
+            }
+            (tmp / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "audit_figure_quality.py"), "--manifest", str(tmp / "manifest.json"), "--report", str(tmp / "report.json")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            kinds = {item["kind"] for item in json.loads((tmp / "report.json").read_text(encoding="utf-8"))["violations"]}
+            self.assertTrue({"font-size", "raster-dpi", "formula-not-vector", "vector-required"}.issubset(kinds))
+
+    def test_render_comparison_reports_identical_images(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            image = Image.new("RGB", (160, 90), "white")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((20, 20, 140, 70), outline="navy", width=4)
+            image.save(tmp / "reference.png")
+            image.save(tmp / "rendered.png")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "compare_renders.py"), "--reference", str(tmp / "reference.png"), "--rendered", str(tmp / "rendered.png"), "--report", str(tmp / "report.json")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            metrics = json.loads((tmp / "report.json").read_text(encoding="utf-8"))["metrics"]
+            self.assertEqual(metrics["luminance_mae"], 0.0)
+            self.assertEqual(metrics["edge_f1"], 1.0)
+
+    def test_svg_use_flattener_inlines_referenced_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            source = tmp / "input.svg"
+            source.write_text(
+                """<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 20 20'><defs><symbol id='g'><path d='M0 0L2 0L2 2Z'/></symbol></defs><g fill='black'><use xlink:href='#g' x='5' y='7'/></g></svg>""",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "flatten_svg_uses.py"), "--input", str(source), "--output", str(tmp / "output.svg")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            root = ET.parse(tmp / "output.svg").getroot()
+            tags = [node.tag.rsplit("}", 1)[-1] for node in root.iter()]
+            self.assertNotIn("use", tags)
+            self.assertNotIn("defs", tags)
+            self.assertIn("path", tags)
 
 
 if __name__ == "__main__":

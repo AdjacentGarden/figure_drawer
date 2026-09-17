@@ -41,6 +41,15 @@ def skeleton(figure_id: str) -> dict:
             "typography": "sans-serif, concise labels",
             "density": "moderate",
         },
+        "reconstruction": {
+            "mode": "reference-guided-hybrid",
+            "min_font_pt": 10.0,
+            "min_micro_font_pt": 8.0,
+            "max_micro_text_fraction": 0.25,
+            "min_raster_dpi": 300,
+            "prefer_vector_formulas": True,
+            "prefer_vector_simple_icons": True,
+        },
         "forbidden": ["invented modules", "decorative arrows without semantics"],
         "assumptions": [],
     }
@@ -79,6 +88,8 @@ def main() -> int:
             "image_prompt": "imagegen-prompt.md",
             "reference": "reference/reference.png",
             "reference_provenance": "reference/reference-provenance.json",
+            "quality_audit": "final/quality-audit.json",
+            "render_comparison": "final/render-comparison.json",
             "final_dir": "final",
         },
     }
