@@ -121,6 +121,9 @@ def audit(manifest_path: Path, args: argparse.Namespace) -> dict:
 
     formula_vectors = 0
     for index, item in enumerate(manifest.get("formula_inventory", [])):
+        if not isinstance(item, dict):
+            violations.append({"kind": "formula-inventory-not-object", "index": index, "value": str(item)[:120]})
+            continue
         relative = str(item.get("image", item.get("path", "")))
         if Path(relative).suffix.lower() in VECTOR_SUFFIXES:
             formula_vectors += 1
@@ -128,6 +131,11 @@ def audit(manifest_path: Path, args: argparse.Namespace) -> dict:
             violations.append({"kind": "formula-not-vector", "index": index, "path": relative})
 
     for index, item in enumerate(manifest.get("visual_inventory", [])):
+        if not isinstance(item, dict):
+            # The schema allows plain strings in some inventories, so record the
+            # deviation instead of failing with an AttributeError.
+            violations.append({"kind": "visual-inventory-not-object", "index": index, "value": str(item)[:120]})
+            continue
         if item.get("vector_required") is not True:
             continue
         relative = str(item.get("path", ""))
