@@ -52,7 +52,7 @@ class SkillScriptTests(unittest.TestCase):
             spec = {"exact_text": ["Encoder", "Decoder"]}
             (tmp / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
             (tmp / "validation.json").write_text(json.dumps({"passed": True}), encoding="utf-8")
-            slide = """<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><a:p><a:r><a:t>Encoder</a:t></a:r></a:p><a:p><a:r><a:t>Decoder</a:t></a:r></a:p></p:cSld></p:sld>"""
+            slide = """<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Encoder</a:t></a:r></a:p><a:p><a:r><a:t>Decoder</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"""
             with zipfile.ZipFile(tmp / "result.pptx", "w") as archive:
                 archive.writestr("ppt/slides/slide1.xml", slide)
             result = subprocess.run(
@@ -75,7 +75,7 @@ class SkillScriptTests(unittest.TestCase):
             tmp = Path(tmp)
             (tmp / "spec.json").write_text(json.dumps({"exact_text": ["V"]}), encoding="utf-8")
             (tmp / "validation.json").write_text(json.dumps({"passed": True}), encoding="utf-8")
-            slide = """<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><a:p><a:r><a:t>Visual Encoder</a:t></a:r></a:p></p:cSld></p:sld>"""
+            slide = """<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Visual Encoder</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"""
             with zipfile.ZipFile(tmp / "result.pptx", "w") as archive:
                 archive.writestr("ppt/slides/slide1.xml", slide)
             result = subprocess.run(
