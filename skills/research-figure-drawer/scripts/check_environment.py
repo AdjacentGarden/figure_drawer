@@ -1,45 +1,98 @@
 #!/usr/bin/env python3
-"""Check the runtime required by research-figure-drawer."""
+"""Check the runtime required by research-figure-drawer.
+
+The skill is self-contained: the editppt reconstruction runtime is vendored at
+``<skill-root>/cli`` and pinned by ``cli/VENDOR.json``. This check reports whether the
+bundled runtime is present and runnable, whether its Python dependencies are importable,
+and whether every vendored file still matches its recorded hash.
+"""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import json
-import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
-DEPENDENCY_REPO = "https://github.com/ningzimu/image-to-editable-ppt-skill"
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+BUNDLED_CLI = SKILL_ROOT / "cli"
+VENDOR_MANIFEST = BUNDLED_CLI / "VENDOR.json"
+LAUNCHER = SKILL_ROOT / "scripts" / "run_editppt.py"
+
+# Runtime dependencies declared by the bundled cli/pyproject.toml.
+PYTHON_DEPENDENCIES = {
+    "PyMuPDF": "fitz",
+    "Pillow": "PIL",
+    "openai": "openai",
+    "PyYAML": "yaml",
+    "numpy": "numpy",
+    "requests": "requests",
+}
+
+UPSTREAM_REPOSITORY = "https://github.com/ningzimu/image-to-editable-ppt-skill"
 
 
-def dependency_candidates(explicit: str | None) -> list[Path]:
-    values: list[Path] = []
+def sha256_lf(path: Path) -> str:
+    """Hash UTF-8 content with normalised line endings, matching git storage."""
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def verify_vendor_manifest() -> dict:
+    """Verify every vendored file against the hashes recorded in cli/VENDOR.json."""
+    if not VENDOR_MANIFEST.is_file():
+        return {"ok": False, "checked": 0, "problems": [f"missing vendor manifest: {VENDOR_MANIFEST}"]}
+    try:
+        manifest = json.loads(VENDOR_MANIFEST.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {"ok": False, "checked": 0, "problems": [f"unreadable vendor manifest: {exc}"]}
+
+    problems: list[str] = []
+    files = manifest.get("files") or {}
+    for relative, expected in sorted(files.items()):
+        path = SKILL_ROOT / relative
+        if not path.is_file():
+            problems.append(f"missing vendored file: {relative}")
+            continue
+        actual = sha256_lf(path)
+        if actual != expected:
+            problems.append(f"vendored file changed since it was recorded: {relative}")
+    if manifest.get("file_count") != len(files):
+        problems.append("vendor manifest file_count does not match its file list")
+    return {
+        "ok": not problems,
+        "checked": len(files),
+        "upstream_repository": manifest.get("upstream_repository"),
+        "upstream_commit": manifest.get("upstream_commit"),
+        "license": manifest.get("license"),
+        "problems": problems,
+    }
+
+
+def resolve_runtime(explicit: str | None) -> list[str] | None:
+    """Prefer an explicit path, then editppt on PATH, then the bundled launcher."""
     if explicit:
-        values.append(Path(explicit).expanduser())
-    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
-    values.extend(
-        [
-            codex_home / "skills" / "image-to-editable-ppt",
-            Path.home() / ".codex" / "skills" / "image-to-editable-ppt",
-        ]
-    )
-    unique: list[Path] = []
-    for value in values:
-        resolved = value.resolve()
-        if resolved not in unique:
-            unique.append(resolved)
-    return unique
+        return [explicit]
+    executable = shutil.which("editppt")
+    if executable:
+        return [executable]
+    if LAUNCHER.is_file():
+        return [sys.executable, str(LAUNCHER)]
+    return None
 
 
-def run_doctor(executable: str) -> dict:
+def run_command(command: list[str], args: list[str], timeout: int = 60) -> dict:
     try:
         result = subprocess.run(
-            [executable, "doctor", "--json"],
+            [*command, *args],
             text=True,
             capture_output=True,
-            timeout=30,
+            timeout=timeout,
             check=False,
         )
     except Exception as exc:  # pragma: no cover - platform-specific errors
@@ -57,25 +110,44 @@ def run_doctor(executable: str) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dependency-skill", help="Explicit image-to-editable-ppt skill directory")
+    parser.add_argument("--editppt", help="Explicit path to an editppt executable to prefer")
     parser.add_argument("--strict", action="store_true", help="Exit nonzero when required components are missing")
     args = parser.parse_args()
 
-    candidates = dependency_candidates(args.dependency_skill)
-    dependency = next((p for p in candidates if (p / "SKILL.md").is_file()), None)
-    editppt = shutil.which("editppt")
+    bundled = {
+        "ok": (BUNDLED_CLI / "pyproject.toml").is_file() and (BUNDLED_CLI / "editppt" / "cli.py").is_file(),
+        "path": str(BUNDLED_CLI),
+        "package": str(BUNDLED_CLI / "editppt"),
+    }
+    vendor = verify_vendor_manifest()
+
+    command = resolve_runtime(args.editppt)
+    if command is None:
+        editppt = {"ok": False, "command": None, "reason": "no editppt executable and no bundled launcher"}
+    else:
+        mode = "path" if len(command) == 1 else "bundled-launcher"
+        editppt = {
+            "command": command,
+            "mode": mode,
+            "help": run_command(command, ["--help"]),
+            "doctor": run_command(command, ["doctor", "--json"]),
+        }
+        editppt["ok"] = bool(editppt["help"].get("ok"))
+
+    missing = sorted(name for name, module in PYTHON_DEPENDENCIES.items() if importlib.util.find_spec(module) is None)
+    dependencies = {
+        "ok": not missing,
+        "missing": missing,
+        "declared_by": "cli/pyproject.toml",
+        "install_hint": "python3 -m pip install -e <skill-root>/cli",
+    }
+
     report = {
-        "dependency_skill": {
-            "ok": dependency is not None,
-            "path": str(dependency) if dependency else None,
-            "searched": [str(p) for p in candidates],
-            "repository": DEPENDENCY_REPO,
-        },
-        "editppt": {
-            "ok": editppt is not None,
-            "path": editppt,
-            "doctor": run_doctor(editppt) if editppt else None,
-        },
+        "skill_root": str(SKILL_ROOT),
+        "bundled_runtime": bundled,
+        "vendored_files": vendor,
+        "editppt": editppt,
+        "python_dependencies": dependencies,
         "reference_image_backend": {
             "default": "builtin image_gen.imagegen",
             "api_key_required": False,
@@ -87,11 +159,12 @@ def main() -> int:
             },
         },
     }
-    report["ok"] = bool(dependency and editppt)
+    report["ok"] = bool(bundled["ok"] and editppt["ok"] and vendor["ok"] and dependencies["ok"])
     if not report["ok"]:
         report["install_hint"] = (
-            "Install both skills, install the dependency CLI, restart the client, then run editppt doctor. "
-            "See references/installation.md."
+            "Install the bundled runtime with `python3 -m pip install -e <skill-root>/cli` (or run "
+            "`python3 scripts/run_editppt.py <command>` without installing), then verify with "
+            f"`editppt doctor`. Vendored files come from {UPSTREAM_REPOSITORY}. See references/installation.md."
         )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 1 if args.strict and not report["ok"] else 0

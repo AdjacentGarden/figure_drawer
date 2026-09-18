@@ -25,7 +25,11 @@ def main() -> int:
         raise SystemExit("--model must be a GPT Image model id")
     executable = shutil.which(args.editppt) if Path(args.editppt).name == args.editppt else args.editppt
     if not executable:
-        raise SystemExit("editppt was not found. Install image-to-editable-ppt and its CLI first.")
+        raise SystemExit(
+            "editppt was not found. Install the bundled runtime "
+            "(`python3 -m pip install -e <skill-root>/cli`) or pass --editppt "
+            "`python3 scripts/run_editppt.py`."
+        )
     prompt = Path(args.prompt).expanduser().resolve()
     if not prompt.is_file():
         raise SystemExit(f"Prompt file not found: {prompt}")

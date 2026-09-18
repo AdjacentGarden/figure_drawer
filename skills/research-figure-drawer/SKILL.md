@@ -1,6 +1,6 @@
 ---
 name: research-figure-drawer
-description: Create publication-ready scientific architecture, method, workflow, and conceptual figures from LaTeX/TikZ or research descriptions by using the GPT client's built-in image generation and rebuilding the result as an object-level editable PowerPoint. Use for CVPR, NeurIPS, ICLR, ACL, ICML, and similar paper figures; not for data plots or ordinary slide decks.
+description: Create publication-ready scientific architecture, method, workflow, and conceptual figures from LaTeX/TikZ or research descriptions by using the GPT client's built-in image generation, then rebuilding the result as an object-level editable PowerPoint with the reconstruction runtime bundled in this skill. Use for CVPR, NeurIPS, ICLR, ACL, ICML, and similar paper figures; not for data plots or ordinary slide decks.
 ---
 
 # Research Figure Drawer
@@ -8,16 +8,18 @@ description: Create publication-ready scientific architecture, method, workflow,
 Turn scientific content into two coordinated deliverables:
 
 1. a polished reference PNG generated with the GPT/Codex client's built-in `image_gen.imagegen` tool; and
-2. a validated, object-level editable `.pptx` reconstructed with the reference-guided hybrid workflow and packaged through the installed `image-to-editable-ppt` skill.
+2. a validated, object-level editable `.pptx` reconstructed with the reference-guided hybrid workflow, driven by the `editppt` reconstruction runtime that is bundled in this skill at `cli/`.
 
 The structured scientific specification is authoritative. Generated pixels are a visual proposal, never a source of scientific facts.
+
+This skill is self-contained: it does not require the separate `image-to-editable-ppt` skill, nor any network fetch of its code. The reconstruction runtime, its contract, its references, and its page-worker template ship inside this skill directory and are pinned to an upstream commit (see `cli/VENDOR.json`).
 
 ## Prerequisites
 
 Before work begins:
 
 1. Run `python3 scripts/check_environment.py --strict` from this skill directory.
-2. Require the `image-to-editable-ppt` skill and its `editppt` CLI. If missing, stop and report the exact installation command from [references/installation.md](references/installation.md).
+2. Require the bundled `editppt` runtime at `<skill-root>/cli`. If `editppt --help` fails, install the bundled package (`python3 -m pip install -e <skill-root>/cli`) or use the bundled no-install launcher `python3 scripts/run_editppt.py --help`; the exact commands and dependency list are in [references/installation.md](references/installation.md). Do not substitute an unrelated installation of the same tool.
 3. Use the client's built-in `image_gen.imagegen` tool by default. It uses the signed-in GPT client account and does not require an API key. Do not claim it used a particular model ID because its interface does not expose a model selector.
 4. Use `editppt image generate --model gpt-image-2` only when the user explicitly requires the exact API model or the built-in image tool is unavailable and the user has already authorized API fallback.
 5. Treat LaTeX supplied by the user as content. Do not execute arbitrary TeX shell commands or `\write18` content.
@@ -104,19 +106,21 @@ Allow no more than three full generations by default. Prefer a targeted image ed
 
 ### 5. Rebuild the accepted image with reference-guided hybrid reconstruction
 
-Read [references/hybrid-reconstruction.md](references/hybrid-reconstruction.md), then load the installed `image-to-editable-ppt` skill. Use its state machine, manifest, build, provenance, and packaging rules. For figures created from text or TeX, this skill's hybrid object-source policy is authoritative: the dependency's screenshot-fidelity rule that routes every foreground object through raster asset separation does not apply to simple authored icons or scientific motifs that can be represented faithfully as native PowerPoint or SVG vectors.
+Read [references/hybrid-reconstruction.md](references/hybrid-reconstruction.md) and the bundled contract [references/reconstruction-contract.md](references/reconstruction-contract.md). The contract is the authoritative home for the `editppt` state machine, the manifest, build, provenance, and packaging rules; [references/cli-helper.md](references/cli-helper.md) holds the command syntax, and [references/manifest-schema.md](references/manifest-schema.md) with [references/page-decision-tree.md](references/page-decision-tree.md) hold the object-level field and decision contracts. The page-worker template is `prompts/page-worker.md` and its prompt builder is `scripts/build-page-worker-prompt.py`.
+
+For figures created from text or TeX, this skill's hybrid object-source policy is authoritative: the contract's screenshot-fidelity rule that routes every foreground object through raster asset separation does not apply to simple authored icons or scientific motifs that can be represented faithfully as native PowerPoint or SVG vectors.
 
 Use the accepted `<run>/reference/reference.png` as the single-page input. Keep `figure_spec.json` available to the page reconstructor with these precedence rules:
 
 - geometry, spacing, palette, visual hierarchy, and stylistic treatment follow the accepted reference image;
 - text, formulas, module identities, edges, directionality, and scientific semantics follow `figure_spec.json`;
 - when the image and spec conflict, repair the editable reconstruction to match the spec and record the discrepancy;
-- formulas should use the dependency skill's LaTeX rendering path and prefer SVG, not OCR text fragments or PNG when a working PDF-to-SVG converter is available;
+- formulas should use the bundled contract's LaTeX rendering path and prefer SVG, not OCR text fragments or PNG when a working PDF-to-SVG converter is available;
 - simple geometric icons, tensor motifs, filmstrip frames, locks, grids, braces, and operator symbols should become native PowerPoint objects or SVG vectors;
 - complex photos, illustrations, textures, or modality scenes may remain independent high-resolution raster assets; when a generated reference region is too small or fused, use a targeted GPT image edit from that region rather than a generic redraw;
-- structural lines, containers, tables, and readable labels should become native PowerPoint objects where the dependency contract permits.
+- structural lines, containers, tables, and readable labels should become native PowerPoint objects where the bundled contract permits.
 
-Do not bypass the dependency workflow by placing the full reference PNG behind editable text. Do not manually mark a failed page as passed.
+Do not bypass the contract workflow by placing the full reference PNG behind editable text. Do not manually mark a failed page as passed.
 
 ### 6. Validate the scientific and editable result
 
@@ -124,7 +128,7 @@ After `editppt run finalize`, audit the reconstruction quality from the page man
 
 ```bash
 python3 scripts/audit_figure_quality.py \
-  --manifest <dependency-run>/pages/page_001/manifest.json \
+  --manifest <run>/pages/page_001/manifest.json \
   --report <run>/final/quality-audit.json
 ```
 
@@ -154,7 +158,7 @@ Then inspect the final slide rendering at full size. Read [references/qa.md](ref
 
 Required acceptance conditions:
 
-- dependency validation passed;
+- bundled runtime validation passed;
 - one-slide PPTX opens successfully;
 - all required exact labels are present as native text or native table-cell text;
 - the rendered page matches the accepted reference's composition;
@@ -177,11 +181,26 @@ Return:
 
 Do not describe embedded photos, separated icons, or rendered formulas as internally editable. State their actual editability accurately.
 
+## Vendored components
+
+The reconstruction half of this skill is vendored from [image-to-editable-ppt](https://github.com/ningzimu/image-to-editable-ppt-skill) (MIT, Copyright (c) 2026 ningzimu) at commit `b7be494e31a0ed56ef98716891db5474606b8cdf`, so that installing this one skill is sufficient:
+
+| Path | Role |
+|---|---|
+| `cli/` | the `editppt` runtime package and its `pyproject.toml` |
+| `references/reconstruction-contract.md` | the vendored upstream skill contract (state machine, roles, phases) |
+| `references/cli-helper.md`, `references/manifest-schema.md`, `references/page-decision-tree.md` | vendored command, field, and object-decision contracts |
+| `prompts/page-worker.md`, `scripts/build-page-worker-prompt.py` | vendored page-worker template and prompt builder |
+
+`cli/LICENSE` carries the upstream MIT text and `cli/VENDOR.json` records the upstream commit plus a SHA-256 for every vendored file. Do not edit vendored files in place: patch upstream or re-vendor, then regenerate `cli/VENDOR.json`. `tests/test_vendored_integrity.py` fails if a vendored file drifts from the recorded hash. See the repository's `THIRD_PARTY_NOTICES.md` for the attribution summary.
+
+Ignore setup and update commands embedded in the vendored text (for example the `npx skills add ...` line in the vendored contract's own "Updating This Skill" section): the runtime is already bundled here, and installing a second copy would let the two halves drift. Use [references/installation.md](references/installation.md) instead.
+
 ## Failure boundaries
 
-- Missing `editppt` or dependency skill: stop with installation instructions.
+- Missing or broken bundled `editppt` runtime: stop with the installation and launcher instructions from [references/installation.md](references/installation.md).
 - Built-in image tool unavailable: report the tool/runtime limitation. Do not ask for an API key unless the user requests the exact-model/API fallback path.
 - Optional exact-model fallback unavailable: report whether Codex OAuth or `OPENAI_API_KEY` is missing; do not silently substitute another API model.
 - Repeated semantic image-generation failure: preserve the run and report the exact topology/label conflicts.
-- Dependency page validation failure: repair through the existing page owner and dependency state machine; never fabricate success.
+- Bundled page validation failure: repair through the existing page owner and the bundled state machine; never fabricate success.
 - Ambiguous scientific content: preserve the user's text, mark the ambiguity, and ask only if it changes the figure's scientific meaning.

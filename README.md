@@ -1,11 +1,11 @@
 # Research Figure Drawer
 
-An installable Codex/GPT client skill that turns scientific LaTeX, TikZ, architecture descriptions, and method workflows into:
+A self-contained Codex/GPT client skill that turns scientific LaTeX, TikZ, architecture descriptions, and method workflows into:
 
 - a publication-ready reference figure generated with the GPT/Codex client's built-in image tool; and
 - a validated, object-level editable PowerPoint figure.
 
-The workflow uses a structured scientific specification as the source of truth, then delegates object-level PowerPoint reconstruction to [`image-to-editable-ppt`](https://github.com/ningzimu/image-to-editable-ppt-skill).
+Both halves ship in one skill. The editable-PPT reconstruction runtime (`editppt`), its contract, its references, and its page-worker template are vendored inside `skills/research-figure-drawer/` and pinned to an upstream commit, so installing this skill requires no second skill.
 
 ## Why this is different
 
@@ -20,36 +20,36 @@ figure_spec.json — authoritative labels, formulas, modules, and edges
         ↓
 client built-in image generation — polished reference PNG
         ↓
-image-to-editable-ppt — native text, shapes, paths, tables, and independent assets
+bundled editppt runtime — native text, shapes, paths, tables, and independent assets
         ↓
-scientific validation + editppt validation + rendered visual QA
+scientific validation + quality audit + rendered visual QA
         ↓
 editable one-slide PPTX
 ```
 
 ## Installation
 
-Install this skill and its required conversion skill, then restart the client:
+Install this skill and restart the client:
 
 ```bash
 npx -y skills@latest add AdjacentGarden/figure_drawer \
   --skill research-figure-drawer \
   --agent codex \
   --global
-
-npx -y skills@latest add ningzimu/image-to-editable-ppt-skill \
-  --skill image-to-editable-ppt \
-  --agent codex \
-  --global
 ```
 
-If the dependency CLI is not available, follow its current setup instructions and verify:
+Then prepare the bundled runtime (dependencies are declared in `skills/research-figure-drawer/cli/pyproject.toml`):
 
 ```bash
+cd <skill-root>
+python3 scripts/check_environment.py --strict
+python3 -m pip install -e cli        # gives you the `editppt` command
+# or run it with no install step:
+python3 scripts/run_editppt.py --help
 editppt doctor
 ```
 
-The default path uses the client-provided `image_gen.imagegen` tool and therefore does not require an API key. [ChatGPT Pro includes image creation](https://help.openai.com/en/articles/9793128-what-is-chatgpt-pro/), subject to separate plan and tool limits. Exact [`gpt-image-2`](https://developers.openai.com/api/docs/models/gpt-image-2) API selection remains available as an optional fallback and may require Codex OAuth or `OPENAI_API_KEY`.
+The default image path uses the client-provided `image_gen.imagegen` tool and therefore does not require an API key. [ChatGPT Pro includes image creation](https://help.openai.com/en/articles/9793128-what-is-chatgpt-pro/), subject to separate plan and tool limits. Exact [`gpt-image-2`](https://developers.openai.com/api/docs/models/gpt-image-2) API selection remains available as an optional fallback and may require Codex OAuth or `OPENAI_API_KEY`.
 
 ## Usage
 
@@ -65,7 +65,7 @@ Typical outputs include:
 - editable `.pptx`
 - rendered preview
 - `figure_spec.json`
-- scientific and structural validation reports
+- scientific, structural, quality, and render-comparison reports
 
 ## Repository layout
 
@@ -74,11 +74,21 @@ skills/research-figure-drawer/
 ├── SKILL.md
 ├── agents/openai.yaml
 ├── assets/figure-drawer.svg
-├── references/
+├── cli/              ← vendored editppt runtime (MIT) + VENDOR.json
+├── prompts/          ← vendored page-worker template
+├── references/       ← this skill's references + vendored contracts
 └── scripts/
 examples/
 tests/
 ```
+
+## Vendored components and attribution
+
+| Component | Upstream | License |
+|---|---|---|
+| `skills/research-figure-drawer/cli/` and the vendored reference/prompt files | [ningzimu/image-to-editable-ppt-skill](https://github.com/ningzimu/image-to-editable-ppt-skill) @ `b7be494e31a0ed56ef98716891db5474606b8cdf` | MIT, Copyright (c) 2026 ningzimu |
+
+Vendored files are byte-for-byte upstream and must not be edited in place; `cli/VENDOR.json` records a SHA-256 for each one and `tests/test_vendored_integrity.py` fails on undocumented drift. The upstream license text travels with the code at `skills/research-figure-drawer/cli/LICENSE`; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full attribution.
 
 ## Boundaries
 
@@ -100,4 +110,4 @@ python3 -m unittest discover -s tests -v
 
 ## License
 
-MIT
+MIT. Vendored third-party components remain under their own licenses — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
