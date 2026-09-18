@@ -8,7 +8,7 @@ description: Create publication-ready scientific architecture, method, workflow,
 Turn scientific content into two coordinated deliverables:
 
 1. a polished reference PNG generated with the GPT/Codex client's built-in `image_gen.imagegen` tool; and
-2. a validated, object-level editable `.pptx` reconstructed through the installed `image-to-editable-ppt` skill.
+2. a validated, object-level editable `.pptx` reconstructed with the reference-guided hybrid workflow and packaged through the installed `image-to-editable-ppt` skill.
 
 The structured scientific specification is authoritative. Generated pixels are a visual proposal, never a source of scientific facts.
 
@@ -102,30 +102,51 @@ Inspect the generated image. Compare it against `figure_spec.json`, not just aga
 
 Allow no more than three full generations by default. Prefer a targeted image edit for a localized visual defect. If scientific correctness still fails, stop and report the mismatch instead of converting a knowingly incorrect figure.
 
-### 5. Rebuild the accepted image as editable PPTX
+### 5. Rebuild the accepted image with reference-guided hybrid reconstruction
 
-Now load and follow the installed `image-to-editable-ppt` skill. Its `SKILL.md`, state machine, page manifest, provenance rules, and validation rules are authoritative for this phase.
+Read [references/hybrid-reconstruction.md](references/hybrid-reconstruction.md), then load the installed `image-to-editable-ppt` skill. Use its state machine, manifest, build, provenance, and packaging rules. For figures created from text or TeX, this skill's hybrid object-source policy is authoritative: the dependency's screenshot-fidelity rule that routes every foreground object through raster asset separation does not apply to simple authored icons or scientific motifs that can be represented faithfully as native PowerPoint or SVG vectors.
 
 Use the accepted `<run>/reference/reference.png` as the single-page input. Keep `figure_spec.json` available to the page reconstructor with these precedence rules:
 
 - geometry, spacing, palette, visual hierarchy, and stylistic treatment follow the accepted reference image;
 - text, formulas, module identities, edges, directionality, and scientific semantics follow `figure_spec.json`;
 - when the image and spec conflict, repair the editable reconstruction to match the spec and record the discrepancy;
-- formulas should use the dependency skill's LaTeX rendering path, not OCR text fragments;
-- semantic icons and complex visual assets follow the dependency skill's asset-separation rules;
+- formulas should use the dependency skill's LaTeX rendering path and prefer SVG, not OCR text fragments or PNG when a working PDF-to-SVG converter is available;
+- simple geometric icons, tensor motifs, filmstrip frames, locks, grids, braces, and operator symbols should become native PowerPoint objects or SVG vectors;
+- complex photos, illustrations, textures, or modality scenes may remain independent high-resolution raster assets; when a generated reference region is too small or fused, use a targeted GPT image edit from that region rather than a generic redraw;
 - structural lines, containers, tables, and readable labels should become native PowerPoint objects where the dependency contract permits.
 
 Do not bypass the dependency workflow by placing the full reference PNG behind editable text. Do not manually mark a failed page as passed.
 
 ### 6. Validate the scientific and editable result
 
-After `editppt run finalize`, run:
+After `editppt run finalize`, audit the reconstruction quality from the page manifest:
+
+```bash
+python3 scripts/audit_figure_quality.py \
+  --manifest <dependency-run>/pages/page_001/manifest.json \
+  --report <run>/final/quality-audit.json
+```
+
+Render the final PPTX and compare that render with the accepted reference using:
+
+```bash
+python3 scripts/compare_renders.py \
+  --reference <run>/reference/reference.png \
+  --rendered <run>/final/final-preview.png \
+  --report <run>/final/render-comparison.json
+```
+
+The comparison metrics are diagnostic, not scientific truth. Inspect both images at full size and repair meaningful hierarchy, spacing, palette, or routing differences.
+
+Then run the scientific/package validation and require the quality report:
 
 ```bash
 python3 scripts/validate_figure_run.py \
   --spec <run>/figure_spec.json \
   --pptx <dependency-run>/final/<name>_edited.pptx \
   --editppt-validation <dependency-run>/final/validation.json \
+  --quality-report <run>/final/quality-audit.json \
   --report <run>/final/figure-validation.json
 ```
 
@@ -138,6 +159,7 @@ Required acceptance conditions:
 - all required exact labels are present as native text or native table-cell text;
 - the rendered page matches the accepted reference's composition;
 - the structure matches `figure_spec.json`;
+- the quality audit passes, including configured minimum font size, raster DPI, vector-formula, and explicitly vector-required icon checks;
 - no important arrow crosses text or terminates ambiguously;
 - the final PPTX does not contain the full reference image as a fake editable background.
 
@@ -150,6 +172,7 @@ Return:
 - rendered final preview;
 - `figure_spec.json`;
 - `figure-validation.json`;
+- `quality-audit.json` and `render-comparison.json`;
 - a concise list of any permitted visual differences.
 
 Do not describe embedded photos, separated icons, or rendered formulas as internally editable. State their actual editability accurately.

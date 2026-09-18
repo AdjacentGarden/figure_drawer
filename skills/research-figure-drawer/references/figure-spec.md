@@ -53,6 +53,15 @@
     "typography": "sans-serif, concise labels",
     "density": "moderate"
   },
+  "reconstruction": {
+    "mode": "reference-guided-hybrid",
+    "min_font_pt": 10.0,
+    "min_micro_font_pt": 8.0,
+    "max_micro_text_fraction": 0.25,
+    "min_raster_dpi": 300,
+    "prefer_vector_formulas": true,
+    "prefer_vector_simple_icons": true
+  },
   "forbidden": ["invented modules", "decorative arrows without semantics"],
   "assumptions": []
 }
@@ -73,6 +82,8 @@ IDs must be unique. Every edge endpoint must reference an existing module or gro
 `exact_text` contains every claim-bearing label that must appear as editable text in the final PPTX. Use short visible labels; keep long explanations in `description` for prompt context rather than forcing paragraphs into the figure.
 
 Formulas preserve the user's LaTeX exactly unless a syntax-only repair is required. Record any repair in `assumptions`.
+
+`reconstruction` controls the editable deliverable, not the GPT reference image. `reference-guided-hybrid` keeps the generated image as the composition and style target while routing each final object to native PowerPoint, SVG, or high-resolution raster according to [hybrid-reconstruction.md](hybrid-reconstruction.md). Text marked as micro-annotation may use `min_micro_font_pt`; keep its share below `max_micro_text_fraction` so the exception cannot hide an unreadable figure.
 
 ## TeX and TikZ inputs
 

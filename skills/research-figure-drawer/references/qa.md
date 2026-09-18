@@ -18,6 +18,9 @@ Evaluate the result in four layers.
 - Lines do not cross text or terminate ambiguously.
 - Colors remain distinguishable in grayscale and do not carry meaning alone.
 - Decorative details do not compete with the method contribution.
+- Body labels meet the configured minimum font size; micro-annotations remain a minority and meet their separate minimum.
+- Raster assets meet the configured effective DPI at their placed size.
+- Simple icons and formulas marked as vector-required are SVG, EMF, or native PowerPoint objects.
 
 ## Editability
 
@@ -33,6 +36,7 @@ Evaluate the result in four layers.
 - The scientific validation script passes.
 - The final PPTX opens and contains exactly one slide for one requested figure.
 - A rendered preview has been compared with the accepted reference.
+- `quality-audit.json` passes and `render-comparison.json` records the reference-versus-final diagnostic metrics.
 - The run preserves `figure_spec.json`, prompt, reference image, validation reports, and final artifacts.
 
 Minor antialiasing, font-metric, or image-asset edge differences may be recorded as warnings. Scientific mismatches, missing labels, broken topology, and fake editability are failures.
