@@ -34,6 +34,7 @@ the spec controls scientific meaning.**
 - [💬 Usage examples](#-usage-examples)
 - [📦 What you get](#-what-you-get)
 - [🧪 Validation gates](#-validation-gates)
+- [🖼 Raster and screenshot input](#-raster-and-screenshot-input)
 - [🔬 The spec is the source of truth](#-the-spec-is-the-source-of-truth)
 - [🗂 Repository layout](#-repository-layout)
 - [🧩 Vendored components](#-vendored-components)
@@ -150,11 +151,43 @@ Plus the deliverables themselves: the **editable `.pptx`**, the **reference PNG*
 | Scientific | `scripts/validate_figure_run.py` | a required `exact_text` label is not native text |
 | Structure | `editppt` page/deck validation | the package cannot be rebuilt from the manifest |
 | Quality | `scripts/audit_figure_quality.py` | text below the minimum font size, raster below 300 DPI, a formula that should be vector |
-| Visual | `scripts/compare_renders.py` | large composition or palette drift from the accepted reference |
+| Text metrics | `scripts/solve_text_metrics.py` | a measured solve cannot be verified by ink IoU against the source |
+| Fidelity | `scripts/compare_renders.py` | SSIM, content alignment, lost source ink, or a per-text-box check is past its threshold |
 
 > [!NOTE]
-> `compare_renders.py` metrics are **diagnostics, not truth**. They flag drift for a human look; they never
-> override `figure_spec.json`, and they never waive a missing required step.
+> `compare_renders.py` is a **gate**: it exits non-zero and names `repair_targets` in source pixels, so a bad
+> region gets rebuilt instead of merely noted. Its metrics are still diagnostics rather than truth — they never
+> override `figure_spec.json`, and `--advisory` does not satisfy the acceptance conditions.
+
+## 🖼 Raster and screenshot input
+
+Screenshots have no vector source, so the figure half of this skill does not apply — the reconstruction half
+does, and it is where quality is usually lost. Two additions target exactly that:
+
+**1. Text is measured, not estimated.** The deterministic builder derives font sizes from a per-character
+width table, which lands systematically smaller than the source. `solve_text_metrics.py` instead binarises each
+detected line, solves the size from real glyph advance widths, rasterises the string and scores it against the
+source ink by IoU, then converts the ink box into the line box the builder anchors at. Measured against
+synthetic ground truth (10–40 px glyphs on a 1280×720 page):
+
+| Method | Mean abs error | Max error |
+|---|---|---|
+| Width-table estimate (as shipped) | 3.05 pt | 5.82 pt |
+| Width-table estimate with `font_size_source: "measured"` | 1.58 pt | 3.14 pt |
+| `solve_text_metrics.py` | **0.01 pt** | 0.05 pt |
+
+Ink placement error is 1.1 px horizontally and 1.0 px vertically (max 2.0 px), and the solved rendering matches
+the source ink at IoU 0.80–0.99.
+
+**2. The loop is closed.** A render is only accepted after it passes the gate. Tile SSIM alone is not enough:
+deleting a thin text line from a mostly-white tile barely moves SSIM, so the gate adds a lost-ink channel and
+per-text-box checks, and reports the regions to rebuild. Recovery is bounded at two passes, and a region that
+keeps failing is reported rather than looped on.
+
+See [`references/raster-precision.md`](skills/research-figure-drawer/references/raster-precision.md) for the
+method, the thresholds, the recovery loop, and the limits worth stating honestly (font availability, low-confidence
+solves, and why a full-slide raster background is not offered as a shortcut).
+
 
 ## 🔬 The spec is the source of truth
 
@@ -195,8 +228,8 @@ When the image and the spec disagree, the spec wins:
 │   ├── assets/figure-drawer.svg  # logo
 │   ├── cli/                      # vendored editppt runtime + LICENSE + VENDOR.json
 │   ├── prompts/page-worker.md    # vendored page-worker template
-│   ├── references/               # spec, design, QA, hybrid reconstruction + vendored contracts
-│   └── scripts/                  # run, prompt, import, audit, compare, validate
+│   ├── references/               # spec, design, QA, raster precision + vendored contracts
+│   └── scripts/                  # solve, run, prompt, import, audit, gate, validate
 ├── examples/multimodal-method.json
 ├── tests/                        # unit tests, including vendored-integrity checks
 ├── THIRD_PARTY_NOTICES.md

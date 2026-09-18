@@ -108,6 +108,18 @@ Allow no more than three full generations by default. Prefer a targeted image ed
 
 Read [references/hybrid-reconstruction.md](references/hybrid-reconstruction.md) and the bundled contract [references/reconstruction-contract.md](references/reconstruction-contract.md). The contract is the authoritative home for the `editppt` state machine, the manifest, build, provenance, and packaging rules; [references/cli-helper.md](references/cli-helper.md) holds the command syntax, and [references/manifest-schema.md](references/manifest-schema.md) with [references/page-decision-tree.md](references/page-decision-tree.md) hold the object-level field and decision contracts. The page-worker template is `prompts/page-worker.md` and its prompt builder is `scripts/build-page-worker-prompt.py`.
 
+**For screenshot or flattened-image input, solve the text layer; never estimate it by eye.** The builder otherwise derives font sizes from a per-character width table, which measures systematically smaller than the source (mean 3.05 pt, max 5.82 pt of error across 10-40 px glyphs). Run:
+
+```bash
+python3 scripts/solve_text_metrics.py \
+  --image <page_dir>/source.png \
+  --hints <page_dir>/text_hints.json \
+  --out <page_dir>/text-solve.json \
+  --slide 13.333x7.5
+```
+
+Copy the report's `text_boxes` into the page manifest: they carry `font_size_source: "measured"`, a box converted from ink extent to the line box the builder anchors at, a colour sampled from the darkest ink cluster, and `preview_font` (an absolute font path, without which the bundled preview renders text in a bitmap fallback font on Windows and Linux). Verified solves set `fit_text: false` because the width-table clamp can only shrink a correct measurement; low-confidence items, and items the detector returned without recognised text, keep the guard enabled and need your own reading of the source. Read [references/raster-precision.md](references/raster-precision.md) for the method, the measured accuracy, and the limits.
+
 For figures created from text or TeX, this skill's hybrid object-source policy is authoritative: the contract's screenshot-fidelity rule that routes every foreground object through raster asset separation does not apply to simple authored icons or scientific motifs that can be represented faithfully as native PowerPoint or SVG vectors.
 
 Use the accepted `<run>/reference/reference.png` as the single-page input. Keep `figure_spec.json` available to the page reconstructor with these precedence rules:
@@ -132,16 +144,19 @@ python3 scripts/audit_figure_quality.py \
   --report <run>/final/quality-audit.json
 ```
 
-Render the final PPTX and compare that render with the accepted reference using:
+Render the final PPTX and run the fidelity gate against the accepted reference:
 
 ```bash
 python3 scripts/compare_renders.py \
   --reference <run>/reference/reference.png \
   --rendered <run>/final/final-preview.png \
+  --layout <page_dir>/text-solve.json \
   --report <run>/final/render-comparison.json
 ```
 
-The comparison metrics are diagnostic, not scientific truth. Inspect both images at full size and repair meaningful hierarchy, spacing, palette, or routing differences.
+This is a **gate, not a report**: it exits non-zero when the render drifts past the thresholds, and `repair_targets` names the worst regions in source pixels with failing text boxes ranked first. Its metrics are still diagnostics rather than scientific truth, so inspect both images at full size as well; but a failing gate must be repaired, not noted.
+
+Recovery loop, bounded at two passes: repair only the objects intersecting each `repair_targets` box, rebuild the preview, re-run the gate. Fix canvas- and scale-level problems first, because content-extent misalignment makes every other metric unreliable. If the same region keeps failing, stop and report the region, the metric, and the source crop instead of looping. Passing `--advisory` keeps the old always-zero diagnostic behaviour and does not satisfy the acceptance conditions in [references/qa.md](references/qa.md).
 
 Then run the scientific/package validation and require the quality report:
 

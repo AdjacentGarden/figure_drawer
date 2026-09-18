@@ -39,4 +39,6 @@ Copy the `figure_spec.json.reconstruction` values into the page manifest as `qua
 
 Run `audit_figure_quality.py` after building the page. Fix failures rather than weakening thresholds for one crowded composition. If many labels do not fit at the minimum size, reduce visual density, shorten non-claim-bearing annotations, or increase the figure's publication footprint.
 
+For screenshot or flattened-image input, do not let the page author estimate text geometry: solve it with `solve_text_metrics.py` and verify the render with the fidelity gate in `compare_renders.py`. The reason and the measured numbers are in [raster-precision.md](raster-precision.md).
+
 Render the final slide at the same aspect ratio as the accepted reference and run `compare_renders.py`. Its pixel metrics help detect large composition or palette drift, but they never override the scientific specification or visual inspection.

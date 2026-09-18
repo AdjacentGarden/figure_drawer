@@ -4,10 +4,13 @@ import importlib.util
 import json
 import subprocess
 import sys
-import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from scratch import scratch_dir  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,9 +36,9 @@ class SkillScriptTests(unittest.TestCase):
         self.assertIn("do not reverse or invent arrows", prompt)
 
     def test_init_run_creates_isolated_contract(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with scratch_dir("init-run") as tmp:
             result = subprocess.run(
-                [sys.executable, str(SCRIPTS / "init_figure_run.py"), "--text", "A -> B", "--out-root", tmp, "--name", "demo"],
+                [sys.executable, str(SCRIPTS / "init_figure_run.py"), "--text", "A -> B", "--out-root", str(tmp), "--name", "demo"],
                 text=True,
                 capture_output=True,
                 check=True,
@@ -47,7 +50,7 @@ class SkillScriptTests(unittest.TestCase):
             self.assertTrue((run_dir / "final").is_dir())
 
     def test_final_validation_checks_native_text(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with scratch_dir("final-validation") as tmp:
             tmp = Path(tmp)
             spec = {"exact_text": ["Encoder", "Decoder"]}
             (tmp / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
@@ -71,7 +74,7 @@ class SkillScriptTests(unittest.TestCase):
             self.assertTrue(json.loads((tmp / "report.json").read_text(encoding="utf-8"))["passed"])
 
     def test_short_label_requires_its_own_native_text(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with scratch_dir("short-label") as tmp:
             tmp = Path(tmp)
             (tmp / "spec.json").write_text(json.dumps({"exact_text": ["V"]}), encoding="utf-8")
             (tmp / "validation.json").write_text(json.dumps({"passed": True}), encoding="utf-8")
@@ -94,7 +97,7 @@ class SkillScriptTests(unittest.TestCase):
             self.assertEqual(json.loads((tmp / "report.json").read_text(encoding="utf-8"))["missing_labels"], ["V"])
 
     def test_builtin_reference_import_records_no_unverified_model(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with scratch_dir("builtin-import") as tmp:
             tmp = Path(tmp)
             source = tmp / "tool-output.png"
             source.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
