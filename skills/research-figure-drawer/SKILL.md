@@ -156,6 +156,8 @@ python3 scripts/compare_renders.py \
 
 This is a **gate, not a report**: it exits non-zero when the render drifts past the thresholds, and `repair_targets` names the worst regions in source pixels with failing text boxes ranked first. Its metrics are still diagnostics rather than scientific truth, so inspect both images at full size as well; but a failing gate must be repaired, not noted.
 
+Two kinds of text finding are separated on purpose. A box whose size the solve margin pinned down and whose placement matches, but whose glyph shape differs, is recorded as a **font-substitution difference** rather than a failure: the source font is not installed, and that has to be reported to the user as a visual difference. Boxes that fail on placement, or on ink width without a font explanation, usually mean the supplied string is wrong, truncated, or merged with a neighbour, and those are hard failures. Pass `--fail-on-recorded-differences` when a run has to be glyph-exact.
+
 Recovery loop, bounded at two passes: repair only the objects intersecting each `repair_targets` box, rebuild the preview, re-run the gate. Fix canvas- and scale-level problems first, because content-extent misalignment makes every other metric unreliable. If the same region keeps failing, stop and report the region, the metric, and the source crop instead of looping. Passing `--advisory` keeps the old always-zero diagnostic behaviour and does not satisfy the acceptance conditions in [references/qa.md](references/qa.md).
 
 Then run the scientific/package validation and require the quality report:

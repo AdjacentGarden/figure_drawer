@@ -125,7 +125,11 @@ def check_text_boxes(
     margin = args.text_margin_px
     items: list[dict] = []
     for index, box in enumerate(text_boxes):
-        raw = box.get("box_px")
+        solve = box.get("_solve") or {}
+        # Prefer the ink box the solver measured: the padded box_px can overlap a
+        # neighbouring line, and comparing that overlap would report a placement
+        # error that does not exist.
+        raw = solve.get("ink_box_px") or box.get("box_px")
         if not raw or len(raw) != 4:
             continue
         left = max(0, int(round(float(raw[0]))) - margin)
@@ -154,34 +158,70 @@ def check_text_boxes(
             items.append(record)
             continue
         iou, shift = align_ink_iou(reference_crop, rendered_crop, max_shift=args.align_shift)
+        # Placement is judged by the ink anchors (left/top of the box), not by the
+        # centroid: the centroid moves when a substituted font changes line width,
+        # while the left-aligned anchor does not.
+        left_delta = rendered_ink[0] - reference_ink[0]
+        top_delta = rendered_ink[1] - reference_ink[1]
         reference_centre = (reference_ink[0] + reference_ink[2] / 2, reference_ink[1] + reference_ink[3] / 2)
         rendered_centre = (rendered_ink[0] + rendered_ink[2] / 2, rendered_ink[1] + rendered_ink[3] / 2)
-        offset = (rendered_centre[0] - reference_centre[0], rendered_centre[1] - reference_centre[1])
+        centroid_offset = (rendered_centre[0] - reference_centre[0], rendered_centre[1] - reference_centre[1])
         width_ratio = rendered_ink[2] / reference_ink[2] if reference_ink[2] else 1.0
         height_ratio = rendered_ink[3] / reference_ink[3] if reference_ink[3] else 1.0
         record.update(
             {
                 "ink_iou": round(iou, 4),
-                "offset_px": [round(offset[0], 2), round(offset[1], 2)],
+                "anchor_offset_px": [round(left_delta, 2), round(top_delta, 2)],
+                "centroid_offset_px": [round(centroid_offset[0], 2), round(centroid_offset[1], 2)],
                 "size_ratio": [round(width_ratio, 3), round(height_ratio, 3)],
             }
         )
         problems: list[str] = []
         if iou < args.min_text_ink_iou:
             problems.append("low_ink_similarity")
-        if max(abs(offset[0]), abs(offset[1])) > args.max_text_offset_px:
+        if max(abs(left_delta), abs(top_delta)) > args.max_text_offset_px:
             problems.append("misaligned")
         if abs(width_ratio - 1.0) > args.max_text_size_ratio_delta or abs(height_ratio - 1.0) > args.max_text_size_ratio_delta:
             problems.append("size_mismatch")
-        record["problems"] = problems
-        record["status"] = "ok" if not problems else problems[0]
+
+        solve_margin = solve.get("size_margin")
+        offset_ok = "misaligned" not in problems
+        if (
+            bool(solve.get("font_substitution"))
+            and offset_ok
+            and solve_margin is not None
+            and float(solve_margin) >= args.substitution_margin
+        ):
+            # Placement is verified independently of the font, and the +/-10% solve
+            # margin pins the size down. Ink shape and ink width then differ because
+            # the source font is not installed, which is a recorded difference the
+            # user must decide on rather than a silent pass or a silent failure.
+            record["problems"] = ["font_substitution"]
+            record["status"] = "font_substitution"
+            record["recorded_difference"] = (
+                "size verified by the solve margin and placement verified; glyph shape and ink width differ "
+                "because the source font is not installed"
+            )
+        else:
+            record["problems"] = problems
+            record["status"] = "ok" if not problems else problems[0]
         items.append(record)
 
-    failing = [item for item in items if item.get("problems") and item.get("confidence") != "low"]
-    skipped = [item for item in items if item.get("problems") and item.get("confidence") == "low"]
+    recorded = [item for item in items if item.get("status") == "font_substitution"]
+    failing = [
+        item
+        for item in items
+        if item.get("problems") and item.get("status") != "font_substitution" and item.get("confidence") != "low"
+    ]
+    skipped = [
+        item
+        for item in items
+        if item.get("problems") and item.get("confidence") == "low" and item.get("status") != "font_substitution"
+    ]
     return {
         "checked": len(items),
         "failing": len(failing),
+        "recorded_differences": len(recorded),
         "skipped_low_confidence": len(skipped),
         "items": items,
     }
@@ -272,7 +312,7 @@ def compare(reference: Path, rendered: Path, args: argparse.Namespace) -> dict:
     text_report = (
         check_text_boxes(reference_mask, rendered_mask, text_boxes, args)
         if text_boxes
-        else {"checked": 0, "failing": 0, "skipped_low_confidence": 0, "items": []}
+        else {"checked": 0, "failing": 0, "recorded_differences": 0, "skipped_low_confidence": 0, "items": []}
     )
 
     repair_targets, ink_bad = collect_repair_targets(tiles, reference_mask, rendered_mask, text_report, args)
@@ -314,6 +354,11 @@ def compare(reference: Path, rendered: Path, args: argparse.Namespace) -> dict:
             problems.append(f"content extent is scaled by {scale} instead of ~1.0")
     if text_report.get("failing"):
         problems.append(f"{text_report['failing']} text boxes failed fidelity checks")
+    if args.fail_on_recorded_differences and text_report.get("recorded_differences"):
+        problems.append(
+            f"{text_report['recorded_differences']} text boxes are recorded font-substitution differences "
+            "(strict mode treats them as failures)"
+        )
 
     report = {
         "schema_version": 2,
@@ -378,6 +423,10 @@ def main() -> int:
     parser.add_argument("--min-missing-ink-px", type=int, default=16, help="per-tile missing-ink pixel floor")
     parser.add_argument("--missing-ink-ratio", type=float, default=0.30, help="share of a tile's source ink that must vanish")
     parser.add_argument("--min-reference-ink-px", type=int, default=24, help="ignore tiles with less source ink than this")
+    parser.add_argument("--substitution-margin", type=float, default=0.08,
+                        help="solve margin at or above which a shape-only text difference is recorded as font substitution")
+    parser.add_argument("--fail-on-recorded-differences", action="store_true",
+                        help="treat recorded font-substitution differences as gate failures")
     parser.add_argument("--ink-tolerance-px", type=int, default=1, help="registration tolerance for the ink-loss channel")
     parser.add_argument("--min-text-ink-iou", type=float, default=DEFAULT_MIN_TEXT_INK_IOU)
     parser.add_argument("--max-text-offset-px", type=float, default=DEFAULT_MAX_TEXT_OFFSET_PX)

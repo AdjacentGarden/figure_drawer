@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from image_metrics import (  # noqa: E402  - sibling module, path set above
     align_ink_iou,
     crop_mask,
+    dominant_band,
     ink_bbox,
     ink_color_hex,
     ink_mask,
@@ -139,6 +141,67 @@ def size_candidates(estimate: float, extra: list[float], minimum: float, maximum
     return sorted(value for value in values if value >= 1)
 
 
+def word_level_iou(text: str, font: ImageFont.FreeTypeFont, target_tight: np.ndarray, max_shift: int = 2) -> float | None:
+    """Mean ink IoU over the individual words, mapped 1:1 from the candidate.
+
+    Whole-line IoU is unfair to long lines under font substitution: a small
+    per-glyph advance difference accumulates across the line, so a correct size
+    can score below 0.5 on a full column-width line while scoring 0.75 on a short
+    heading. Word-level comparison removes that accumulation, and because the
+    mapping uses the candidate's own advances without rescaling, a wrong size
+    still drifts out of alignment and scores low.
+    """
+    words = [word for word in str(text).split() if word]
+    if len(words) < 2:
+        return None
+    space = float(font.getlength(" "))
+    scores: list[float] = []
+    cursor = 0.0
+    for word in words:
+        advance = float(font.getlength(word))
+        start = int(round(cursor))
+        end = int(round(cursor + advance))
+        cursor += advance + space
+        if end <= start or start >= target_tight.shape[1]:
+            continue
+        slice_ = target_tight[:, start : min(end, target_tight.shape[1])]
+        if not slice_.any():
+            continue
+        try:
+            word_mask = rasterise_tight(word, font)
+        except Exception:
+            continue
+        iou, _shift = align_ink_iou(slice_, word_mask, max_shift=max_shift)
+        scores.append(iou)
+    return float(np.mean(scores)) if scores else None
+
+
+def size_margin(text: str, font_path: str, best_size_px: float, best_iou: float, target_tight: np.ndarray, max_shift: int, factors=(0.90, 1.10)) -> float:
+    """How much better the winning size is than a clearly wrong one.
+
+    Real pages substitute fonts, so absolute IoU is a weak absolute signal; the
+    discriminating margin between the best size and a +/-10% size is not.
+    """
+    probes: list[float] = []
+    for factor in factors:
+        probe_size = max(1, int(round(best_size_px * factor)))
+        try:
+            probe_mask = rasterise_tight(text, ImageFont.truetype(font_path, probe_size))
+        except Exception:
+            continue
+        iou, _shift = align_ink_iou(target_tight, probe_mask, max_shift=max_shift)
+        probes.append(iou)
+    return float(best_iou - max(probes)) if probes else 0.0
+
+
+def quality_score(record: dict) -> float:
+    """Rank two candidate solves of the same line."""
+    base = record.get("word_iou")
+    if base is None:
+        base = record.get("ink_iou", 0.0)
+    return float(base) + 0.5 * float(record.get("size_margin", 0.0))
+
+
 # --------------------------------------------------------------------------- #
 # solving
 # --------------------------------------------------------------------------- #
@@ -174,6 +237,15 @@ def solve_item(rgb: np.ndarray, gray: np.ndarray, item: dict, fonts: list[FontCa
     region_gray = gray[top:bottom, left:right]
     region_rgb = rgb[top:bottom, left:right]
     region_mask, threshold, inverted = ink_mask(region_gray)
+    # A crop margin can catch a neighbouring line's ascenders or descenders in
+    # dense text, which would inflate the measured ink box and depress the IoU of
+    # an otherwise correct solve. Keep only the band that holds the box centre.
+    band = dominant_band(region_mask, center_row=(hint_box[1] + hint_box[3] // 2) - top)
+    if band is not None:
+        keep = np.zeros_like(region_mask)
+        keep[band[0] : band[1] + 1, :] = region_mask[band[0] : band[1] + 1, :]
+        region_mask = keep
+        record["ink_band_rows"] = [band[0], band[1]]
     box = ink_bbox(region_mask)
     if box is None:
         record.update({"mode": "failed", "reason": "no ink detected inside the hint box"})
@@ -260,9 +332,30 @@ def solve_item(rgb: np.ndarray, gray: np.ndarray, item: dict, fonts: list[FontCa
     box_height = max(1.0, ascent + descent + 2 * pad)
 
     iou = best["iou"]
-    confidence = "high" if iou >= args.high_iou else ("medium" if iou >= args.medium_iou else "low")
+    word_iou = word_level_iou(text, font, target, max_shift=args.align_shift)
+    margin = size_margin(text, best["candidate"].path, best["size_px"], iou, target, args.align_shift)
+    if word_iou is None:
+        # A single word is already short enough for the whole-line score to be fair.
+        shape = iou
+    else:
+        shape = word_iou
+    substitution = False
+    if margin >= args.high_margin and shape >= args.high_word_iou:
+        confidence = "high"
+    elif margin >= args.high_margin and shape >= args.substitution_word_iou:
+        # The +/-10% probes are clearly worse, so the size is pinned down; what is
+        # left is glyph shape. On a real page that normally means the source font
+        # is not installed, which is a recorded difference rather than a bad solve.
+        confidence = "high"
+        substitution = True
+    elif margin >= args.medium_margin and shape >= args.medium_word_iou:
+        confidence = "medium"
+    else:
+        confidence = "low"
     if confidence == "low":
         record["warnings"].append("low_ink_similarity")
+    if substitution:
+        record["warnings"].append("font_substitution")
     if contains_cjk(text) and not any(ord(char) > 0x2E80 for char in best["candidate"].family):
         record["warnings"].append("cjk_text_with_latin_font")
 
@@ -282,7 +375,10 @@ def solve_item(rgb: np.ndarray, gray: np.ndarray, item: dict, fonts: list[FontCa
             # crop; sampling the full image here yields background colour.
             "color": ink_color_hex(region_rgb, region_mask, box),
             "confidence": confidence,
+            "font_substitution": substitution,
             "ink_iou": round(iou, 4),
+            "word_iou": round(word_iou, 4) if word_iou is not None else None,
+            "size_margin": round(margin, 4),
             "box_px": [round(box_left, 2), round(box_top, 2), round(box_width, 2), round(box_height, 2)],
             "line_box_px": {"ascent": round(ascent, 2), "descent": round(descent, 2)},
             "px_per_inch": round(1.0 / scale_inches_per_px, 4) if scale_inches_per_px else None,
@@ -295,7 +391,10 @@ def manifest_text_box(record: dict, args: argparse.Namespace) -> dict | None:
     """Convert a solved record into a manifest `text_boxes` entry."""
     if record.get("mode") != "solved":
         return None
-    trusted = record["confidence"] in {"high", "medium"} and record["ink_iou"] >= args.trust_iou
+    trusted = record["confidence"] in {"high", "medium"} and (
+        (record.get("word_iou") is not None and record["word_iou"] >= args.trust_iou)
+        or record["ink_iou"] >= args.trust_iou
+    )
     item = {
         "text": record["text"],
         "box_px": record["box_px"],
@@ -313,7 +412,10 @@ def manifest_text_box(record: dict, args: argparse.Namespace) -> dict | None:
         "preview_font": record["font_file"] if args.emit_preview_font else None,
         "_solve": {
             "ink_iou": record["ink_iou"],
+            "word_iou": record.get("word_iou"),
+            "size_margin": record.get("size_margin"),
             "confidence": record["confidence"],
+            "font_substitution": record.get("font_substitution", False),
             "font_style": record["font_style"],
             "ink_box_px": record["ink_box_px"],
         },
@@ -394,6 +496,14 @@ def main() -> int:
     parser.add_argument("--align-shift", type=int, default=2, help="pixels of shift tolerance in the ink comparison")
     parser.add_argument("--high-iou", type=float, default=0.75)
     parser.add_argument("--medium-iou", type=float, default=0.55)
+    parser.add_argument("--high-word-iou", type=float, default=0.78, help="word-level IoU for a high-confidence solve")
+    parser.add_argument("--high-margin", type=float, default=0.05, help="size-discrimination margin for a high-confidence solve")
+    parser.add_argument("--medium-word-iou", type=float, default=0.62)
+    parser.add_argument("--substitution-word-iou", type=float, default=0.42,
+                        help="shape IoU that still counts as a verified size when the font is substituted")
+    parser.add_argument("--medium-margin", type=float, default=0.02)
+    parser.add_argument("--consensus", action="store_true", default=True, help="re-solve with the page's dominant font family")
+    parser.add_argument("--no-consensus", dest="consensus", action="store_false")
     parser.add_argument("--trust-iou", type=float, default=0.70, help="IoU at or above which fit_text is disabled")
     parser.add_argument("--emit-preview-font", action="store_true", default=True)
     parser.add_argument("--no-preview-font", dest="emit_preview_font", action="store_false")
@@ -432,10 +542,40 @@ def main() -> int:
 
     items = load_items(hints_path)
     solved = [solve_item(rgb, gray, item, fonts, args) for item in items]
+
+    consensus: dict | None = None
+    if args.consensus:
+        families = Counter(record["font"] for record in solved if record.get("mode") == "solved")
+        if len(families) > 1:
+            # A real page uses a handful of families, so a per-line winner that
+            # scatters across four families is noise. Re-solve with the dominant
+            # family and keep the better of the two attempts per line.
+            dominant = families.most_common(1)[0][0]
+            restricted = [font for font in fonts if font.family == dominant] or fonts
+            second = [solve_item(rgb, gray, item, restricted, args) for item in items]
+            merged = []
+            adopted = 0
+            for first, again in zip(solved, second):
+                if again.get("mode") == "solved" and (
+                    first.get("mode") != "solved" or quality_score(again) >= quality_score(first)
+                ):
+                    merged.append(again)
+                    adopted += 1
+                else:
+                    merged.append(first)
+            consensus = {
+                "dominant_font": dominant,
+                "families_before": dict(families),
+                "re_solved_with_dominant": adopted,
+            }
+            solved = merged
+
     text_boxes = [box for box in (manifest_text_box(record, args) for record in solved) if box]
 
     confidences = [record.get("confidence") for record in solved if record.get("mode") == "solved"]
     ious = [record["ink_iou"] for record in solved if record.get("mode") == "solved"]
+    word_ious = [record["word_iou"] for record in solved if record.get("mode") == "solved" and record.get("word_iou") is not None]
+    margins = [record.get("size_margin", 0.0) for record in solved if record.get("mode") == "solved"]
     report = {
         "schema_version": 1,
         "source": {"path": str(image_path), "width_px": source_width, "height_px": source_height},
@@ -455,7 +595,10 @@ def main() -> int:
             "medium": confidences.count("medium"),
             "low": confidences.count("low"),
             "mean_ink_iou": round(float(np.mean(ious)), 4) if ious else None,
+            "mean_word_iou": round(float(np.mean(word_ious)), 4) if word_ious else None,
+            "mean_size_margin": round(float(np.mean(margins)), 4) if margins else None,
         },
+        "consensus": consensus,
         "items": solved,
         "text_boxes": text_boxes,
         "claim_boundary": (

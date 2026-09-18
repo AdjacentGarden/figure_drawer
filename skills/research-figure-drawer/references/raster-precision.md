@@ -98,6 +98,40 @@ Pass `--advisory` to get the old always-exit-zero diagnostic behaviour.
 > alone is not a sufficient gate. The lost-ink channel and the per-box text checks exist
 > precisely because of that blind spot, and both are covered by tests.
 
+## What a real page showed
+
+These tools were exercised on a real 150 DPI page of a two-column LaTeX paper (1275x1650 px,
+90 measured text lines). Findings that changed the implementation:
+
+| Observation | Consequence |
+|---|---|
+| Whole-line ink IoU falls with line length (0.75 on a short heading, 0.43–0.51 on a column-width line) because the page's font is Nimbus Roman and only Times New Roman was installed | Absolute IoU is not a usable confidence signal under font substitution; the +/-10% **size margin** is (mean 0.16 on that page) |
+| The solver's own font choice scattered across four families for a single-font page | A **consensus pass** re-solves with the dominant family and keeps the better attempt per line |
+| A crop margin caught the previous line's descenders, which read as a 5 px vertical placement error | The solver now keeps only the **ink band containing the hint centre**: top-anchor agreement went from 16/90 to **90/90 within 3 px** |
+| Ink centroids shifted ~40 px purely because a substituted font changes line width | Placement is judged by the **ink anchors**, never the centroid; left anchor is within 3 px on 90/90 lines |
+| Two lines were flagged as failures with ink width at 73–84% of the source | Those were **transcription** errors in the supplied text, not placement or size errors: the gate detects wrong or truncated text independently of the font |
+| The bundled detector found 28 lines on a page with 90 | On dense pages the detector is a starting point only: supply the text yourself (OCR, or the PDF text layer for born-digital input) and add the lines it missed |
+
+Reproduce it with `solve_text_metrics.py --slide 8.5x11` on a page raster, then
+`compare_renders.py --layout ...`; a preview at `preview_scale` equal to the raster DPI compares 1:1.
+
+### Confidence, and what "recorded difference" means
+
+A solve is `high` confidence when the size margin is decisive and the shape score clears the
+threshold. When the margin is decisive but the shape score is only moderate, the residual is
+glyph shape rather than geometry: the tool marks the item `font_substitution`, and the gate
+records it as a **recorded difference** instead of a failure — placement and size were verified,
+the source font simply is not installed. These items are listed in the report and must be
+reported to the user as a visual difference. Pass `--fail-on-recorded-differences` to make them
+hard failures when a run must be glyph-exact (for example after installing the real font).
+
+Low-confidence items are skipped by the gate and need human review; they keep `fit_text` enabled.
+Text boxes that fail on placement or on ink width while *not* being attributed to font
+substitution are the strongest signal available: they usually mean the supplied string is wrong,
+truncated, or merged with a neighbour.
+
+
+
 ## Limits to state honestly
 
 - **The font must be available.** The solver identifies the closest installed candidate

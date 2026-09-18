@@ -34,7 +34,11 @@ For screenshot or flattened-image input, text geometry is measured, not estimate
 - `scripts/compare_renders.py` passed as a gate (not `--advisory`), and `repair_targets`
   was empty or its regions were repaired and re-verified.
 - The font actually used is recorded, and any substitution away from the source font is
-  reported as a visual difference rather than passed silently.
+  reported as a visual difference rather than passed silently. A run is only glyph-exact
+  when the gate was invoked with `--fail-on-recorded-differences` and passed.
+- On dense pages the bundled detector will miss lines: the report states how many lines the
+  detector found versus how many were solved, and the difference was filled from the source
+  (OCR, or the PDF text layer for born-digital input) rather than dropped.
 
 ## Editability
 

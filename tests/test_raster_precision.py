@@ -236,6 +236,59 @@ class SolverTests(unittest.TestCase):
             self.assertEqual(solved["text_boxes"], [])
 
 
+class BandRegressionTests(unittest.TestCase):
+    """Guards the fixes that the real-page test exposed."""
+
+    def test_dominant_band_ignores_a_neighbouring_band(self):
+        metrics = load_module("image_metrics_band", SCRIPTS / "image_metrics.py")
+        mask = np.zeros((40, 10), dtype=bool)
+        mask[4:7, :] = True      # descenders of the line above
+        mask[20:26, :] = True    # the line under measurement
+        band = metrics.dominant_band(mask, center_row=22)
+        self.assertEqual(band, (20, 25))
+        # without a centre the heaviest band still wins
+        self.assertEqual(metrics.dominant_band(mask), (20, 25))
+
+    def test_previous_line_descender_does_not_shift_the_solved_box(self):
+        """A padded hint box that overlaps the line above must not move the solve."""
+        font_path = require_font()
+        with scratch_dir("descender") as directory:
+            canvas = Image.new("RGB", SOURCE_SIZE, (255, 255, 255))
+            # line above, with descenders that reach well below its baseline
+            paste_text(canvas, "gapy jumping", font_path, 20, (80, 100))
+            # the measured line sits close below it
+            target = (80, 130)
+            box = paste_text(canvas, "Measured Line", font_path, 20, target)
+            image = directory / "source.png"
+            canvas.save(image)
+
+            # a padded hint box, as the detectors emit, reaches up into the line above
+            pad_y = 8
+            hint = {
+                "backend": "fixture",
+                "lines": [
+                    {
+                        "box_px": [box[0] - 3, box[1] - pad_y, box[2] + 6, box[3] + 2 * pad_y],
+                        "text": "Measured Line",
+                        "glyph_height_px": box[3],
+                        "line_count": 1,
+                    }
+                ],
+            }
+            hints = directory / "text_hints.json"
+            hints.write_text(json.dumps(hint), encoding="utf-8")
+            solved = run_solver(directory, image, hints)
+
+            record = solved["items"][0]
+            self.assertEqual(record["mode"], "solved")
+            # the band restriction keeps only the measured line, so the ink box is its own
+            self.assertLessEqual(
+                abs(record["ink_box_px"][1] - box[1]),
+                2,
+                f"ink top {record['ink_box_px'][1]} drifted from the true {box[1]}",
+            )
+
+
 class GateTests(unittest.TestCase):
     def test_identical_render_passes_the_gate(self):
         items = [("Exact Match", 22, (120, 90))]

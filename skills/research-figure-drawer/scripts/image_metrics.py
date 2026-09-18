@@ -97,6 +97,35 @@ def dilate(mask: np.ndarray, radius: int = 1) -> np.ndarray:
     return result
 
 
+def dominant_band(mask: np.ndarray, center_row: int | None = None) -> tuple[int, int] | None:
+    """Vertical band of contiguous ink rows that belongs to the line being measured.
+
+    In dense text a crop margin can catch a neighbouring line's ascenders or
+    descenders. The band containing the box centre is the line under measurement;
+    falling back to the band with the most ink keeps single-band crops working.
+    """
+    rows = mask.any(axis=1)
+    if not rows.any():
+        return None
+    bands: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, value in enumerate(rows):
+        if value and start is None:
+            start = index
+        elif not value and start is not None:
+            bands.append((start, index - 1))
+            start = None
+    if start is not None:
+        bands.append((start, len(rows) - 1))
+    if not bands:
+        return None
+    if center_row is not None:
+        for band in bands:
+            if band[0] <= center_row <= band[1]:
+                return band
+    return max(bands, key=lambda band: int(mask[band[0] : band[1] + 1].sum()))
+
+
 def ink_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
     """Tight integer (left, top, width, height) of the True pixels, or None."""
     if mask.size == 0 or not mask.any():
