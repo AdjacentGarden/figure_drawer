@@ -20,6 +20,8 @@ def resolved_policy(manifest: dict, args: argparse.Namespace) -> dict:
         "min_micro_font_pt": 8.0,
         "max_micro_text_fraction": 0.25,
         "min_raster_dpi": 300.0,
+        "prefer_editable_formulas": False,
+        "allow_vector_formula_fallback": True,
         "prefer_vector_formulas": True,
     }
     for key, value in defaults.items():
@@ -120,10 +122,24 @@ def audit(manifest_path: Path, args: argparse.Namespace) -> dict:
             })
 
     formula_vectors = 0
+    formula_editable = 0
     for index, item in enumerate(manifest.get("formula_inventory", [])):
         relative = str(item.get("image", item.get("path", "")))
-        if Path(relative).suffix.lower() in VECTOR_SUFFIXES:
+        decision = str(item.get("decision", ""))
+        editable = item.get("editable") is True and decision.startswith("native-")
+        if editable:
+            formula_editable += 1
+        elif Path(relative).suffix.lower() in VECTOR_SUFFIXES:
             formula_vectors += 1
+            if policy.get("prefer_editable_formulas", False):
+                if not policy.get("allow_vector_formula_fallback", True):
+                    violations.append({"kind": "formula-editable-required", "index": index, "path": relative})
+                elif not str(item.get("fallback_reason", "")).strip():
+                    violations.append({"kind": "formula-fallback-undocumented", "index": index, "path": relative})
+                else:
+                    warnings.append({"kind": "formula-vector-fallback", "index": index, "path": relative})
+        elif policy.get("prefer_editable_formulas", True):
+            violations.append({"kind": "formula-not-editable", "index": index, "decision": decision})
         elif policy.get("prefer_vector_formulas", True):
             violations.append({"kind": "formula-not-vector", "index": index, "path": relative})
 
@@ -154,6 +170,7 @@ def audit(manifest_path: Path, args: argparse.Namespace) -> dict:
             "micro_text_fraction": round(micro_fraction, 4),
             "raster_assets": len(raster_assets),
             "vector_assets": len(vector_assets),
+            "formula_editable": formula_editable,
             "formula_vectors": formula_vectors,
         },
         "raster_assets": raster_assets,

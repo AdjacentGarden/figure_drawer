@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -12,6 +13,18 @@ from pathlib import Path
 
 
 DEPENDENCY_REPO = "https://github.com/ningzimu/image-to-editable-ppt-skill"
+
+
+def prog_id_registered(prog_id: str) -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id):
+            return True
+    except OSError:
+        return False
 
 
 def dependency_candidates(explicit: str | None) -> list[Path]:
@@ -85,6 +98,20 @@ def main() -> int:
                 "selection_method": "editppt image generate --model gpt-image-2",
                 "authentication_note": "Codex OAuth or an OpenAI-compatible API credential may be required only for this optional path.",
             },
+        },
+        "native_equation_backend": {
+            "available": bool(
+                os.name == "nt"
+                and importlib.util.find_spec("win32com")
+                and prog_id_registered("Word.Application")
+                and prog_id_registered("PowerPoint.Application")
+            ),
+            "strategy": "Word OfficeMath pasted into PowerPoint as an editable Word.Document OLE object",
+            "platform": os.name,
+            "pywin32": importlib.util.find_spec("win32com") is not None,
+            "word_registered": prog_id_registered("Word.Application"),
+            "powerpoint_registered": prog_id_registered("PowerPoint.Application"),
+            "fallback": "LaTeX-rendered SVG; visually sharp but not internally editable",
         },
     }
     report["ok"] = bool(dependency and editppt)

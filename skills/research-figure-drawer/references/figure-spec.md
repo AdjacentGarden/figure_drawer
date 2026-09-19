@@ -59,8 +59,14 @@
     "min_micro_font_pt": 8.0,
     "max_micro_text_fraction": 0.25,
     "min_raster_dpi": 300,
+    "prefer_editable_formulas": true,
+    "allow_vector_formula_fallback": true,
     "prefer_vector_formulas": true,
-    "prefer_vector_simple_icons": true
+    "prefer_vector_simple_icons": true,
+    "require_native_simple_geometry": true,
+    "reject_text_overlap": true,
+    "connector_text_inset_px": 2,
+    "require_render_refinement": true
   },
   "forbidden": ["invented modules", "decorative arrows without semantics"],
   "assumptions": []
@@ -83,7 +89,7 @@ IDs must be unique. Every edge endpoint must reference an existing module or gro
 
 Formulas preserve the user's LaTeX exactly unless a syntax-only repair is required. Record any repair in `assumptions`.
 
-`reconstruction` controls the editable deliverable, not the GPT reference image. `reference-guided-hybrid` keeps the generated image as the composition and style target while routing each final object to native PowerPoint, SVG, or high-resolution raster according to [hybrid-reconstruction.md](hybrid-reconstruction.md). Text marked as micro-annotation may use `min_micro_font_pt`; keep its share below `max_micro_text_fraction` so the exception cannot hide an unreadable figure.
+`reconstruction` controls the editable deliverable, not the GPT reference image. `reference-guided-hybrid` keeps the generated image as the composition and style target while routing each final object to native PowerPoint, SVG, or high-resolution raster according to [hybrid-reconstruction.md](hybrid-reconstruction.md). `prefer_editable_formulas` selects native OfficeMath when the environment supports it; `allow_vector_formula_fallback` permits an explicit SVG fallback without pretending it is editable. Text marked as micro-annotation may use `min_micro_font_pt`; keep its share below `max_micro_text_fraction` so the exception cannot hide an unreadable figure. Layout rejection fields are hard acceptance gates, not advisory style preferences.
 
 ## TeX and TikZ inputs
 

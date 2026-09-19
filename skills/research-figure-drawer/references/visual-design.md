@@ -33,7 +33,9 @@ Avoid diagrams made only of identical rounded rectangles. Also avoid excessive p
 
 Image models may produce imperfect text. The prompt still requests exact short labels, while `figure_spec.json` remains authoritative for reconstruction. Prefer at most two text levels plus optional group headings. Do not ask the image model to typeset long paragraphs or dense derivations.
 
-Large or claim-bearing formulas are reconstructed later from LaTeX. In the reference image, reserve a clean formula region and keep surrounding structure accurate.
+Large or claim-bearing formulas are reconstructed later as native OfficeMath when supported, with LaTeX-rendered SVG as a fallback. In the reference image, reserve a clean formula lane with no connector, border, or label behind it and keep surrounding structure accurate.
+
+Generated geometry is art direction, not a measurement source. Ask for canonical simple motifs—shared vertices for cubes, parallel repeated grids, aligned tensor stacks—but normalize them during editable reconstruction even when the reference contains a small perspective defect.
 
 ## Regeneration criteria
 

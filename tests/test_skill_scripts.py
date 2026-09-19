@@ -170,6 +170,108 @@ class SkillScriptTests(unittest.TestCase):
             kinds = {item["kind"] for item in json.loads((tmp / "report.json").read_text(encoding="utf-8"))["violations"]}
             self.assertTrue({"font-size", "raster-dpi", "formula-not-vector", "vector-required"}.issubset(kinds))
 
+    def test_quality_audit_accepts_declared_native_editable_formula(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            manifest = {
+                "slide": {"width": 10, "height": 5.625},
+                "source": {"width_px": 1000, "height_px": 563},
+                "quality_policy": {"prefer_editable_formulas": True},
+                "text_boxes": [{"text": "Encoder", "font_size": 11, "box_px": [20, 20, 100, 30]}],
+                "images": [],
+                "visual_inventory": [],
+                "formula_inventory": [
+                    {
+                        "id": "eq",
+                        "decision": "native-office-math-ole",
+                        "editable": True,
+                        "box_px": [200, 100, 240, 40],
+                    }
+                ],
+            }
+            (tmp / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "audit_figure_quality.py"), "--manifest", str(tmp / "manifest.json"), "--report", str(tmp / "report.json")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads((tmp / "report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["summary"]["formula_editable"], 1)
+
+    def test_layout_audit_rejects_overlap_line_crossing_and_bad_cube(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            manifest = {
+                "source": {"width_px": 1000, "height_px": 600},
+                "quality_policy": {"connector_text_inset_px": 2},
+                "text_boxes": [
+                    {"id": "a", "text": "A", "box_px": [100, 100, 100, 40]},
+                    {"id": "b", "text": "B", "box_px": [150, 110, 100, 40]},
+                ],
+                "formula_inventory": [],
+                "shapes": [
+                    {"type": "line", "points_px": [0, 120, 300, 120], "semantic_line_id": "flow"},
+                    {"type": "polygon", "box_px": [400, 100, 40, 20], "polygon_px": [[420, 100], [440, 110], [420, 120], [400, 109]], "geometry_role": "isometric-cube-face", "cube_id": "cube", "face": "top"},
+                    {"type": "polygon", "box_px": [400, 110, 20, 30], "polygon_px": [[400, 110], [420, 120], [420, 140], [400, 130]], "geometry_role": "isometric-cube-face", "cube_id": "cube", "face": "left"},
+                    {"type": "polygon", "box_px": [420, 110, 20, 30], "polygon_px": [[420, 120], [440, 110], [440, 130], [420, 140]], "geometry_role": "isometric-cube-face", "cube_id": "cube", "face": "right"},
+                ],
+            }
+            (tmp / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "audit_layout_geometry.py"), "--manifest", str(tmp / "manifest.json"), "--report", str(tmp / "layout.json")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            kinds = {item["kind"] for item in json.loads((tmp / "layout.json").read_text(encoding="utf-8"))["violations"]}
+            self.assertTrue({"content-overlap", "connector-crosses-content", "cube-face-not-parallelogram"}.issubset(kinds))
+
+    def test_layout_audit_accepts_separated_content_and_exact_cube(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            manifest = {
+                "source": {"width_px": 1000, "height_px": 600},
+                "text_boxes": [
+                    {"id": "a", "text": "A", "box_px": [100, 100, 80, 30]},
+                    {"id": "b", "text": "B", "box_px": [260, 100, 80, 30]},
+                ],
+                "formula_inventory": [],
+                "shapes": [
+                    {"type": "line", "points_px": [180, 150, 260, 150], "semantic_line_id": "flow"},
+                    {"type": "polygon", "box_px": [400, 100, 40, 20], "polygon_px": [[420, 100], [440, 110], [420, 120], [400, 110]], "geometry_role": "isometric-cube-face", "cube_id": "cube", "face": "top"},
+                    {"type": "polygon", "box_px": [400, 110, 20, 30], "polygon_px": [[400, 110], [420, 120], [420, 140], [400, 130]], "geometry_role": "isometric-cube-face", "cube_id": "cube", "face": "left"},
+                    {"type": "polygon", "box_px": [420, 110, 20, 30], "polygon_px": [[420, 120], [440, 110], [440, 130], [420, 140]], "geometry_role": "isometric-cube-face", "cube_id": "cube", "face": "right"},
+                ],
+            }
+            (tmp / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "audit_layout_geometry.py"), "--manifest", str(tmp / "manifest.json"), "--report", str(tmp / "layout.json")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_native_equation_audit_verifies_embedded_word_object(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            spec = {"equations": [{"id": "loss"}]}
+            (tmp / "native-equations.json").write_text(json.dumps(spec), encoding="utf-8")
+            slide = """<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="Equation loss"/></p:nvGraphicFramePr><p:graphic><p:graphicData><p:oleObj progId="Word.Document.8"/></p:graphicData></p:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>"""
+            with zipfile.ZipFile(tmp / "equation.pptx", "w") as archive:
+                archive.writestr("ppt/slides/slide1.xml", slide)
+                archive.writestr("ppt/embeddings/oleObject1.bin", b"fixture")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "audit_native_equations.py"), "--pptx", str(tmp / "equation.pptx"), "--spec", str(tmp / "native-equations.json"), "--report", str(tmp / "audit.json")],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_render_comparison_reports_identical_images(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)

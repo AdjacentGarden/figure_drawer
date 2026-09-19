@@ -21,13 +21,17 @@ Evaluate the result in four layers.
 - Body labels meet the configured minimum font size; micro-annotations remain a minority and meet their separate minimum.
 - Raster assets meet the configured effective DPI at their placed size.
 - Simple icons and formulas marked as vector-required are SVG, EMF, or native PowerPoint objects.
+- `layout-audit.json` has no content collisions, connector-through-content findings, or canonical-geometry violations.
+- A PowerPoint/WPS render is inspected after object insertion; manifest coordinates alone are not accepted as proof of clean layout.
 
 ## Editability
 
 - Titles, labels, group headings, and annotations are native PowerPoint text.
 - Structural containers, ordinary lines, arrows, paths, and tables are native objects when supported.
 - Complex icons or illustrations are independent movable assets with recorded provenance.
-- Formulas are independent LaTeX-rendered assets unless native equation support is explicitly implemented.
+- Formulas prefer native OfficeMath/Word OLE objects when the environment supports them and are verified in the final PPTX package.
+- SVG formulas are permitted only as an explicit fallback and are reported as non-editable.
+- Regular cubes, grids, and tensor stacks are native geometry with shared vertices and exact spacing, not traced generated-image irregularities.
 - No full-slide raster is used as a hidden or visible substitute for editable reconstruction.
 
 ## Packaging
@@ -36,7 +40,7 @@ Evaluate the result in four layers.
 - The scientific validation script passes.
 - The final PPTX opens and contains exactly one slide for one requested figure.
 - A rendered preview has been compared with the accepted reference.
-- `quality-audit.json` passes and `render-comparison.json` records the reference-versus-final diagnostic metrics.
+- `quality-audit.json` and `layout-audit.json` pass; `native-equation-audit.json` passes when native equations are requested; `render-comparison.json` records the reference-versus-final diagnostic metrics.
 - The run preserves `figure_spec.json`, prompt, reference image, validation reports, and final artifacts.
 
 Minor antialiasing, font-metric, or image-asset edge differences may be recorded as warnings. Scientific mismatches, missing labels, broken topology, and fake editability are failures.

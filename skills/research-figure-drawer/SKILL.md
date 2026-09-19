@@ -111,10 +111,14 @@ Use the accepted `<run>/reference/reference.png` as the single-page input. Keep 
 - geometry, spacing, palette, visual hierarchy, and stylistic treatment follow the accepted reference image;
 - text, formulas, module identities, edges, directionality, and scientific semantics follow `figure_spec.json`;
 - when the image and spec conflict, repair the editable reconstruction to match the spec and record the discrepancy;
-- formulas should use the dependency skill's LaTeX rendering path and prefer SVG, not OCR text fragments or PNG when a working PDF-to-SVG converter is available;
-- simple geometric icons, tensor motifs, filmstrip frames, locks, grids, braces, and operator symbols should become native PowerPoint objects or SVG vectors;
+- formulas should prefer editable OfficeMath objects when the environment capability check succeeds; use the dependency skill's LaTeX-to-SVG path only as an explicit non-editable fallback, never OCR fragments or PNG;
+- simple geometric icons, tensor motifs, filmstrip frames, locks, grids, braces, and operator symbols should become constraint-built native PowerPoint objects first, with SVG reserved for shapes that native geometry cannot faithfully express;
 - complex photos, illustrations, textures, or modality scenes may remain independent high-resolution raster assets; when a generated reference region is too small or fused, use a targeted GPT image edit from that region rather than a generic redraw;
 - structural lines, containers, tables, and readable labels should become native PowerPoint objects where the dependency contract permits.
+
+Do not treat generated pixels as exact geometry. Before adding decorative or raster assets, reserve boxes for native text and formulas, reserve connector corridors, and normalize canonical geometry such as cubes, grids, repeated cells, and tensor stacks. The GPT reference remains the style and composition guide; the manifest constraints determine editability, alignment, shared vertices, and collision-free routing.
+
+Before `editppt run record`, compare the page's PowerPoint/WPS render against the GPT reference using the object-correspondence check in [references/hybrid-reconstruction.md](references/hybrid-reconstruction.md). Structural validation alone is not permission to drop or replace reference motifs with generic placeholders. Repair missing motifs and large composition drift while the page is still locally owned; then validate and record it.
 
 Do not bypass the dependency workflow by placing the full reference PNG behind editable text. Do not manually mark a failed page as passed.
 
@@ -128,9 +132,30 @@ python3 scripts/audit_figure_quality.py \
   --report <run>/final/quality-audit.json
 ```
 
+Audit the layout contract separately:
+
+```bash
+python3 scripts/audit_layout_geometry.py \
+  --manifest <dependency-run>/pages/page_001/manifest.json \
+  --report <run>/final/layout-audit.json
+```
+
+If native equations were inserted, verify the final PPTX package rather than trusting only the manifest declaration:
+
+```bash
+python3 scripts/audit_native_equations.py \
+  --pptx <dependency-run>/final/<name>_edited.pptx \
+  --spec <dependency-run>/pages/page_001/native-equations.json \
+  --report <run>/final/native-equation-audit.json
+```
+
 Render the final PPTX and compare that render with the accepted reference using:
 
 ```bash
+python3 scripts/render_pptx_office.py \
+  --pptx <dependency-run>/final/<name>_edited.pptx \
+  --output <run>/final/final-preview.png
+
 python3 scripts/compare_renders.py \
   --reference <run>/reference/reference.png \
   --rendered <run>/final/final-preview.png \
@@ -159,7 +184,9 @@ Required acceptance conditions:
 - all required exact labels are present as native text or native table-cell text;
 - the rendered page matches the accepted reference's composition;
 - the structure matches `figure_spec.json`;
-- the quality audit passes, including configured minimum font size, raster DPI, vector-formula, and explicitly vector-required icon checks;
+- the quality audit passes, including configured minimum font size, raster DPI, formula source, and explicitly vector-required icon checks;
+- the layout audit passes with no accidental content overlap, connector-through-text/formula violation, out-of-bounds object, or malformed canonical geometry;
+- formulas requested as editable are verified in the final PPTX as native OfficeMath/Word OLE objects; any SVG fallback is explicitly reported as non-editable;
 - no important arrow crosses text or terminates ambiguously;
 - the final PPTX does not contain the full reference image as a fake editable background.
 
@@ -172,7 +199,7 @@ Return:
 - rendered final preview;
 - `figure_spec.json`;
 - `figure-validation.json`;
-- `quality-audit.json` and `render-comparison.json`;
+- `quality-audit.json`, `layout-audit.json`, any `native-equation-audit.json`, and `render-comparison.json`;
 - a concise list of any permitted visual differences.
 
 Do not describe embedded photos, separated icons, or rendered formulas as internally editable. State their actual editability accurately.
