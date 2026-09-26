@@ -207,9 +207,17 @@ Encoder</a:t></a:r></a:p></p:txBody></p:sp>
     def test_prompt_builder_preserves_topology_and_labels(self):
         module = load_module("prompt_builder", SCRIPTS / "build_imagegen_prompt.py")
         data = json.loads((ROOT / "examples" / "multimodal-method.json").read_text(encoding="utf-8"))
+        data["source_evidence"] = [{
+            "role": "code",
+            "path": "/project/model.py",
+            "sha256": "abc123",
+            "summary": "The forward path confirms one cross-attention block before the decoder.",
+        }]
         prompt = module.build_prompt(data)
         self.assertIn("from=visual_encoder; to=cross_attention", prompt)
         self.assertIn('"Cross-Modal Attention"', prompt)
+        self.assertIn("path=/project/model.py", prompt)
+        self.assertIn("forward path confirms one cross-attention block", prompt)
         self.assertIn("do not reverse or invent arrows", prompt)
 
     def test_init_run_creates_isolated_contract(self):

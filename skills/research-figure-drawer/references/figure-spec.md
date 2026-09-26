@@ -17,6 +17,14 @@
     "reading_direction": "left-to-right"
   },
   "scientific_message": "One sentence stating what the figure must communicate.",
+  "source_evidence": [
+    {
+      "role": "paper",
+      "path": "/path/to/paper.pdf",
+      "sha256": "...",
+      "summary": "Figure-relevant facts extracted from this source."
+    }
+  ],
   "groups": [
     {"id": "encoder", "label": "Encoder", "description": "..."}
   ],
@@ -80,6 +88,11 @@
 IDs must be unique. Every edge endpoint must reference an existing module or group boundary. Repeated modules remain separate unless the user explicitly says weights are shared. Do not convert an undirected relationship into a directed arrow. Do not add residual, attention, normalization, loss, or supervision paths merely because they are common in the field.
 
 `exact_text` contains every claim-bearing label that must appear as editable text in the final PPTX. Use short visible labels; keep long explanations in `description` for prompt context rather than forcing paragraphs into the figure.
+
+For paper/code/dataset-driven authoring, `source_evidence` records the local
+source path, hash, role, and a curated figure-relevant summary. The GPT image
+service cannot read local paths, so paths are provenance rather than a substitute
+for extracted content. Follow [research-source-ingestion.md](research-source-ingestion.md).
 
 Formulas preserve the user's LaTeX exactly unless a syntax-only repair is required. Record any repair in `assumptions`.
 

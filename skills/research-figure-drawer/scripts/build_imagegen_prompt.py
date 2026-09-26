@@ -50,6 +50,14 @@ def validate(spec: dict) -> None:
                 raise ValueError(f"Edge {edge_id} has unknown {key} endpoint: {edge.get(key)}")
     if not str(spec.get("scientific_message", "")).strip():
         raise ValueError("scientific_message must be completed before image generation")
+    for index, item in enumerate(spec.get("source_evidence", []), 1):
+        if not isinstance(item, dict):
+            raise ValueError(f"source_evidence item {index} must be an object")
+        missing_evidence = [key for key in ("role", "path", "summary") if not str(item.get(key, "")).strip()]
+        if missing_evidence:
+            raise ValueError(
+                f"source_evidence item {index} is missing: {', '.join(missing_evidence)}"
+            )
 
 
 def lines_for_items(items: list[dict], fields: tuple[str, ...]) -> list[str]:
@@ -67,12 +75,17 @@ def build_prompt(spec: dict) -> str:
     exact = [str(value) for value in spec.get("exact_text", [])]
     palette = ", ".join(style.get("palette", [])) or "restrained academic palette"
     forbidden = [str(value) for value in spec.get("forbidden", [])]
+    evidence = spec.get("source_evidence", [])
 
     sections = [
         "Create one publication-ready scientific figure, not a presentation slide mockup.",
         "",
         "SCIENTIFIC PURPOSE",
         str(spec["scientific_message"]),
+        "",
+        "CURATED SOURCE EVIDENCE",
+        "Local paths are provenance. The summaries below contain the source facts relevant to the figure.",
+        *lines_for_items(evidence, ("role", "path", "sha256", "summary")),
         "",
         "CANVAS AND READING ORDER",
         f"- aspect ratio: {canvas.get('aspect_ratio', '16:9')}",

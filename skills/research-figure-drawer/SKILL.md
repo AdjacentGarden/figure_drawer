@@ -1,17 +1,25 @@
 ---
 name: research-figure-drawer
-description: Create or reconstruct publication-ready scientific architecture, method, workflow, and mechanism figures as object-level editable PPTX, including WPS-native reference-guided reconstruction and LaTeX/TikZ input. Use for CVPR, NeurIPS, ICLR, ACL, ICML, ICCV and similar ML paper figures; not for data plots or ordinary slide decks.
+description: Create publication-ready ML/AI architecture, method, workflow, and mechanism figures from paper content, code paths, dataset evidence, TeX, or reference images. For paper/code/dataset inputs, first generate a GPT visual reference, then reconstruct it as an object-level editable WPS/PPTX. Use for CVPR, NeurIPS, ICLR, ACL, ICML, ICCV and similar research figures; not for data plots or ordinary slide decks.
 ---
 
 # Research Figure Drawer
 
-Turn scientific content or a published mechanism figure into two coordinated deliverables: a documented visual reference and a validated, object-level editable `.pptx`. Choose the reference and reconstruction route from the evidence:
+Turn scientific content or an existing mechanism figure into two coordinated deliverables: a documented visual reference and a validated, object-level editable `.pptx`.
 
-1. Complete TikZ/PGF geometry: compile deterministically, then reconstruct native slide objects.
-2. Semantic description without fixed geometry: generate a visual proposal with the client's built-in `image_gen.imagegen` tool, then use the bundled `editppt` hybrid reconstruction runtime at `cli/`.
-3. Published figure visible as a reference: reconstruct with live WPS Presentation text, shapes and connectors using `scripts/wps_native_builder.py`; use isolated photos/icons only where needed.
+For a new figure whose inputs are a paper, manuscript text, implementation paths, configuration files, or dataset paths, the mandatory default is **image-first**:
 
-The structured scientific specification is authoritative. Generated pixels are a visual proposal, never a source of scientific facts. When the input already contains complete TikZ/PGF geometry, compile it deterministically instead of asking an image model to redraw it.
+```text
+paper + code + dataset evidence
+  -> curated scientific specification
+  -> GPT-generated PNG reference
+  -> reference-guided editable PPT reconstruction
+  -> WPS reopen render and editability audit
+```
+
+Do not draw the final WPS/PPT geometry directly from research text merely because that is possible. The GPT-generated reference establishes the composition and visual style; `figure_spec.json` remains authoritative for modules, topology, formulas, and labels. Skip GPT image generation only when the user explicitly asks to skip it, supplies an existing image to reconstruct, or requests exact deterministic reconstruction of complete TikZ/PGF geometry.
+
+Local paths are not directly accessible to the image model. Inspect the supplied paper, code, configuration, and dataset paths locally; place concise figure-relevant facts plus source paths and hashes in `source_evidence`; then send the generated prompt to GPT. Read [references/research-source-ingestion.md](references/research-source-ingestion.md) for this required source-bundling procedure.
 
 This skill is self-contained: it does not require the separate `image-to-editable-ppt` skill, nor any network fetch of its code. The hybrid reconstruction runtime, its contract, its references, and its page-worker template ship inside this skill directory and are pinned to an upstream commit (see `cli/VENDOR.json`). The native WPS route additionally needs Windows WPS Presentation and `pywin32`.
 
@@ -19,14 +27,14 @@ For an existing published figure, declare the evaluation task before drawing: **
 
 ## Prerequisites
 
-Before work begins, select the renderer from the source type. The following image-generation/editppt prerequisites apply only to the semantic-generation or hybrid reconstruction route; a reference-guided **native WPS** reconstruction uses the WPS prerequisites described below instead:
+Before work begins, select the renderer from the source type. Research-source authoring uses GPT image generation first and then WPS-native or hybrid reconstruction. Existing-image and deterministic TikZ tasks may start from their supplied reference instead:
 
 1. Run `python3 scripts/check_environment.py --strict` from this skill directory.
 2. Require the bundled `editppt` runtime at `<skill-root>/cli`. If `editppt --help` fails, install the bundled package (`python3 -m pip install -e <skill-root>/cli`) or use the bundled no-install launcher `python3 scripts/run_editppt.py --help`; the exact commands and dependency list are in [references/installation.md](references/installation.md). Do not substitute an unrelated installation of the same tool.
-3. For a new figure from a semantic description, use the client's built-in `image_gen.imagegen` tool by default. It uses the signed-in GPT client account and does not require an API key. Do not claim it used a particular model ID because its interface does not expose a model selector. Do not generate a new aesthetic reference when the task is to reconstruct an existing published image.
+3. For a new figure from a paper, code, dataset, or semantic description, use the client's built-in `image_gen.imagegen` tool. This image stage is mandatory unless the user explicitly opts out. It uses the signed-in GPT client account and does not require an API key. Do not claim it used a particular model ID because its interface does not expose a model selector. Do not generate a replacement reference when the task is to reconstruct an existing published image exactly.
 4. Use `editppt image generate --model gpt-image-2` only when the user explicitly requires the exact API model or the built-in image tool is unavailable and the user has already authorized API fallback.
 5. Treat LaTeX supplied by the user as content. Do not execute arbitrary TeX shell commands or `\write18` content.
-6. The workflow sends the figure prompt to the client's image service and may send the generated page to OCR/image services during editable reconstruction. If the user marks the material confidential or local-only, pause before external calls and explain that the requested image stage cannot be completed locally.
+6. Before sending source-derived content to the image service, confirm that the run has user authorization for external generation and record that fact in the run metadata. If the user marks the material confidential or local-only, pause before external calls and explain that the mandatory image stage cannot be completed locally. Authorization for one paper does not cover unrelated projects.
 
 ## Workflow
 
@@ -43,7 +51,11 @@ python3 scripts/init_figure_run.py \
 
 The command prints the run directory and creates the expected folders. Do not overwrite an earlier run.
 
-### 2. Classify the TeX evidence before choosing a renderer
+### 2. Ingest research sources and classify exact visual evidence
+
+For paper/code/dataset-driven authoring, read [references/research-source-ingestion.md](references/research-source-ingestion.md). Inspect the supplied paths locally and build `source_evidence` entries with a path, SHA-256, role, and concise figure-relevant summary. Do not paste whole repositories, raw datasets, checkpoints, credentials, or binary assets into the GPT prompt. The remote image model receives the curated prompt, not filesystem access.
+
+Classify TeX only when the input contains TeX or TikZ evidence:
 
 Run:
 
@@ -57,7 +69,7 @@ The result has three actionable modes:
 
 - `deterministic-vector`: TikZ/PGF/PGFPlots geometry is present. Compile it with `scripts/compile_tex_reference.py`; do **not** send it through image generation.
 - `external-image-placeholder`: the TeX only names `\includegraphics` assets. Without those assets the original pixels are not recoverable. If a public published original is available and the request permits using it, use the explicitly labeled reference-guided route. Otherwise ask for the image when exact reconstruction is required, or label the result semantic-only.
-- `semantic-description`: the input contains concepts but no unique visual geometry. Image generation may propose a new figure, but it cannot honestly be evaluated as a pixel-identical reconstruction of an unseen original.
+- `semantic-description`: the input contains concepts but no unique visual geometry. For research-source authoring, generate the GPT reference before reconstruction. It cannot honestly be evaluated as a pixel-identical reconstruction of an unseen original.
 
 Known file/system primitives produce `unsafe-tex`; do not compile them. Read [references/benchmark-protocol.md](references/benchmark-protocol.md) before making any exact-match claim.
 
@@ -90,7 +102,7 @@ For a born-digital published PDF, inspect its text layer. `scripts/import_pdf_te
 
 ### 3. Establish the scientific source of truth
 
-Read [references/figure-spec.md](references/figure-spec.md). Inspect the user's TeX/TikZ or method description, then complete `figure_spec.json` before generating an image.
+Read [references/figure-spec.md](references/figure-spec.md). Inspect the user's paper, implementation, configurations, dataset metadata, TeX/TikZ, or method description, then complete `figure_spec.json` before generating an image. For research-source authoring, include `source_evidence`; the prompt builder passes those curated summaries to GPT.
 
 Preserve exactly:
 
@@ -102,7 +114,7 @@ Preserve exactly:
 
 Do not infer unsupported modules or fashionable architecture details. Record non-critical layout assumptions in `assumptions`; ask one concise question only when an ambiguity would change scientific meaning.
 
-### 4. Build and review the image prompt (non-deterministic input only)
+### 4. Build and review the GPT image prompt
 
 Run:
 
@@ -112,9 +124,9 @@ python3 scripts/build_imagegen_prompt.py \
   --out <run>/imagegen-prompt.md
 ```
 
-For figure-type-specific decisions, read [references/visual-design.md](references/visual-design.md). The prompt must describe topology and exact labels, not merely a visual theme.
+For figure-type-specific decisions, read [references/visual-design.md](references/visual-design.md). The prompt must contain the curated source evidence, topology, exact labels, and visual design requirements—not local paths alone and not merely a visual theme. For research-source authoring, do not continue to PPT construction until this prompt has produced an accepted reference.
 
-### 5. Generate the reference with the client's built-in image tool (non-deterministic input only)
+### 5. Generate and accept the reference with the client's built-in GPT image tool
 
 Call `image_gen.imagegen` directly with the full contents of `<run>/imagegen-prompt.md` as `prompt`. This is a new image, so omit `referenced_image_paths` and `num_last_images_to_include`. Allow the tool the normal long image-generation timeout.
 
@@ -152,7 +164,11 @@ Inspect the generated image. Compare it against `figure_spec.json`, not just aga
 
 Allow no more than three full generations by default. Prefer a targeted image edit for a localized visual defect. If scientific correctness still fails, stop and report the mismatch instead of converting a knowingly incorrect figure.
 
-### 6. Rebuild the accepted image with reference-guided hybrid reconstruction
+### 6. Rebuild the accepted image as an editable PPT
+
+For a Windows WPS target, prefer the native manifest route in [references/wps-native-reconstruction.md](references/wps-native-reconstruction.md): reproduce the accepted GPT reference with live WPS text, shapes, paths, and connectors through `scripts/wps_native_builder.py`. Use isolated raster assets only for genuinely complex pictorial motifs. The accepted PNG is a construction reference and must never become a full-slide picture in the final PPTX.
+
+Use the bundled hybrid reconstruction runtime when its segmentation, OCR, or asset extraction is useful, while preserving the same no-full-slide-raster and native-text requirements.
 
 Read [references/hybrid-reconstruction.md](references/hybrid-reconstruction.md) and the bundled contract [references/reconstruction-contract.md](references/reconstruction-contract.md). The contract is the authoritative home for the `editppt` state machine, the manifest, build, provenance, and packaging rules; [references/cli-helper.md](references/cli-helper.md) holds the command syntax, and [references/manifest-schema.md](references/manifest-schema.md) with [references/page-decision-tree.md](references/page-decision-tree.md) hold the object-level field and decision contracts. The page-worker template is `prompts/page-worker.md` and its prompt builder is `scripts/build-page-worker-prompt.py`.
 
