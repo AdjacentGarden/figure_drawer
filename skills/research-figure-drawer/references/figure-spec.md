@@ -87,4 +87,4 @@ Formulas preserve the user's LaTeX exactly unless a syntax-only repair is requir
 
 ## TeX and TikZ inputs
 
-Treat node labels, math, groups, and edge definitions as evidence. TikZ coordinates are layout hints, not scientific semantics. Preserve directed edges and branch structure even if the original layout is poor. Ignore document-level commands unrelated to the figure. Do not execute shell escape or arbitrary input files.
+Treat node labels, math, groups, and edge definitions as evidence. For a newly designed figure, TikZ coordinates may be treated as layout hints while scientific semantics stay authoritative. For a reconstruction or published-paper benchmark, TikZ/PGF coordinates, styles, colours, dimensions, and draw order are exact visual evidence and must be preserved. Ignore document-level commands unrelated to the figure. Do not execute shell escape or arbitrary input files.

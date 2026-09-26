@@ -18,6 +18,8 @@ the gate fails; pass --advisory to keep the old always-zero behaviour.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -48,6 +50,10 @@ DEFAULT_BAD_TILE_SSIM = 0.60
 DEFAULT_MAX_BAD_TILE_FRACTION = 0.05
 DEFAULT_MIN_TEXT_INK_IOU = 0.55
 DEFAULT_MAX_TEXT_OFFSET_PX = 3.0
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # --------------------------------------------------------------------------- #
@@ -131,12 +137,26 @@ def check_text_boxes(
         # error that does not exist.
         raw = solve.get("ink_box_px") or box.get("box_px")
         if not raw or len(raw) != 4:
+            items.append({
+                "index": index,
+                "text": str(box.get("text", ""))[:80],
+                "status": "invalid_box",
+                "problems": ["invalid_box"],
+                "confidence": str(solve.get("confidence", "unknown")),
+            })
             continue
         left = max(0, int(round(float(raw[0]))) - margin)
         top = max(0, int(round(float(raw[1]))) - margin)
         right = min(width, int(round(float(raw[0]) + float(raw[2]))) + margin)
         bottom = min(height, int(round(float(raw[1]) + float(raw[3]))) + margin)
         if right <= left or bottom <= top:
+            items.append({
+                "index": index,
+                "text": str(box.get("text", ""))[:80],
+                "status": "out_of_bounds",
+                "problems": ["out_of_bounds"],
+                "confidence": str(solve.get("confidence", "unknown")),
+            })
             continue
         reference_crop = reference_mask[top:bottom, left:right]
         rendered_crop = rendered_mask[top:bottom, left:right]
@@ -151,6 +171,7 @@ def check_text_boxes(
         }
         if reference_ink is None:
             record["status"] = "no_source_ink"
+            record["problems"] = ["no_source_ink"]
             items.append(record)
             continue
         if rendered_ink is None:
@@ -219,6 +240,7 @@ def check_text_boxes(
         if item.get("problems") and item.get("confidence") == "low" and item.get("status") != "font_substitution"
     ]
     return {
+        "provided": len(text_boxes),
         "checked": len(items),
         "failing": len(failing),
         "recorded_differences": len(recorded),
@@ -293,6 +315,11 @@ def collect_repair_targets(
 
 def compare(reference: Path, rendered: Path, args: argparse.Namespace) -> dict:
     text_boxes, text_source = load_text_boxes(args.layout, args.manifest)
+    layout_payload = None
+    if args.layout:
+        layout_path = Path(args.layout).expanduser().resolve()
+        if layout_path.is_file():
+            layout_payload = json.loads(layout_path.read_text(encoding="utf-8"))
     size = (args.width, args.height) if args.width and args.height else None
     reference_rgb, rendered_rgb, normalized_size = normalized_pair(reference, rendered, size)
 
@@ -302,11 +329,19 @@ def compare(reference: Path, rendered: Path, args: argparse.Namespace) -> dict:
 
     reference_gray = to_gray(reference_rgb)
     rendered_gray = to_gray(rendered_rgb)
+    rgb_delta = np.abs(reference_rgb.astype(np.float64) - rendered_rgb.astype(np.float64))
+    rgb_mae = float(rgb_delta.mean() / 255.0)
     overall_ssim, score_map = ssim(reference_gray, rendered_gray)
     tiles = tile_grid(score_map, args.tile)
 
     reference_mask, _, _ = ink_mask(reference_gray)
     rendered_mask, _, _ = ink_mask(rendered_gray)
+    foreground_union = np.logical_or(reference_mask, rendered_mask)
+    foreground_rgb_mae = (
+        float(rgb_delta[foreground_union].mean() / 255.0) if foreground_union.any() else 0.0
+    )
+    changed_pixels = np.max(rgb_delta, axis=2) > args.changed_pixel_delta
+    changed_pixel_fraction = float(changed_pixels.mean())
     alignment = content_alignment(reference_mask, rendered_mask)
 
     text_report = (
@@ -359,11 +394,91 @@ def compare(reference: Path, rendered: Path, args: argparse.Namespace) -> dict:
             f"{text_report['recorded_differences']} text boxes are recorded font-substitution differences "
             "(strict mode treats them as failures)"
         )
+    if args.fail_on_low_confidence and text_report.get("skipped_low_confidence"):
+        problems.append(
+            f"{text_report['skipped_low_confidence']} low-confidence text boxes were skipped "
+            "(strict mode requires every supplied text box to be verified)"
+        )
+    if rgb_mae > args.max_rgb_mae:
+        problems.append(f"RGB MAE {rgb_mae:.6f} exceeds {args.max_rgb_mae:.6f}")
+    if foreground_rgb_mae > args.max_foreground_rgb_mae:
+        problems.append(
+            f"foreground RGB MAE {foreground_rgb_mae:.6f} exceeds {args.max_foreground_rgb_mae:.6f}"
+        )
+    if changed_pixel_fraction > args.max_changed_pixel_fraction:
+        problems.append(
+            f"{changed_pixel_fraction:.2%} pixels differ by more than {args.changed_pixel_delta:.1f}/255, "
+            f"above the allowed {args.max_changed_pixel_fraction:.2%}"
+        )
+    if args.require_no_repair_targets and repair_targets:
+        problems.append(f"strict mode requires zero repair targets, found {len(repair_targets)}")
+    if args.strict_identical and layout_payload is not None:
+        summary = layout_payload.get("summary") or {}
+        counts = [int(summary.get(key, -1)) for key in ("items", "solved", "text_boxes")]
+        if len(set(counts)) != 1 or counts[0] < 0:
+            problems.append(
+                "strict mode requires complete text solve coverage: layout items, solved items, and text boxes must match"
+            )
+        bad_modes = [
+            item for item in (layout_payload.get("items") or [])
+            if item.get("mode") != "solved" or item.get("confidence") == "low"
+        ]
+        if bad_modes:
+            problems.append(f"strict mode found {len(bad_modes)} unsolved, hint-only, failed, or low-confidence text items")
+        unverified_text = [
+            item for item in text_report.get("items", [])
+            if item.get("status") not in {"ok", "font_substitution"}
+        ]
+        if text_report.get("checked") != len(text_boxes) or unverified_text:
+            problems.append(
+                "strict mode requires every supplied text box to overlap source ink and pass verification"
+            )
+    elif args.strict_identical:
+        problems.append("strict mode requires --layout with complete text-solve evidence")
+
+    spec_payload = None
+    if args.spec:
+        spec_path = Path(args.spec).expanduser().resolve()
+        if spec_path.is_file():
+            spec_payload = json.loads(spec_path.read_text(encoding="utf-8"))
+        else:
+            problems.append(f"missing figure spec: {spec_path}")
+    if args.strict_identical and spec_payload:
+        required_text = Counter(str(value).strip() for value in spec_payload.get("exact_text", []) if str(value).strip())
+        solved_text = Counter(str(item.get("text", "")).strip() for item in text_boxes if str(item.get("text", "")).strip())
+        missing_text_inventory = sorted((required_text - solved_text).elements())
+        if missing_text_inventory:
+            problems.append("strict text inventory is missing: " + ", ".join(missing_text_inventory))
+    elif args.strict_identical:
+        problems.append("strict mode requires --spec with the authoritative exact-text inventory")
+
+    render_provenance = None
+    if args.render_provenance:
+        provenance_path = Path(args.render_provenance).expanduser().resolve()
+        if provenance_path.is_file():
+            render_provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        else:
+            problems.append(f"missing render provenance: {provenance_path}")
+    if args.require_wps_render:
+        if not render_provenance:
+            problems.append("strict mode requires WPS render provenance")
+        elif render_provenance.get("passed") is not True or "WPS" not in str(render_provenance.get("renderer", "")):
+            problems.append("render provenance does not certify a successful WPS Presentation export")
+        else:
+            rendered_hash = file_sha256(rendered)
+            reopened = render_provenance.get("reopened_exports") or []
+            reopened_hashes = {
+                str(item.get("sha256")) for item in reopened if isinstance(item, dict) and item.get("sha256")
+            }
+            if rendered_hash not in reopened_hashes:
+                problems.append("rendered PNG hash is not one of the WPS reopened-export hashes")
 
     report = {
         "schema_version": 2,
         "reference": str(reference),
         "rendered": str(rendered),
+        "reference_sha256": file_sha256(reference),
+        "rendered_sha256": file_sha256(rendered),
         "normalized_size": list(normalized_size),
         "source_size": list(reference_size),
         "rendered_size": list(rendered_size),
@@ -378,6 +493,9 @@ def compare(reference: Path, rendered: Path, args: argparse.Namespace) -> dict:
             "bad_tile_fraction": round(bad_fraction, 4),
             "lost_ink_tile_count": missing_ink_count,
             "lost_ink_tile_fraction": round(missing_ink_fraction, 4),
+            "rgb_mae": round(rgb_mae, 6),
+            "foreground_rgb_mae": round(foreground_rgb_mae, 6),
+            "changed_pixel_fraction": round(changed_pixel_fraction, 6),
         },
         "content_alignment": alignment,
         "text_checks": text_report,
@@ -389,8 +507,15 @@ def compare(reference: Path, rendered: Path, args: argparse.Namespace) -> dict:
             "max_missing_ink_fraction": args.max_missing_ink_fraction,
             "min_text_ink_iou": args.min_text_ink_iou,
             "max_text_offset_px": args.max_text_offset_px,
+            "max_rgb_mae": args.max_rgb_mae,
+            "max_foreground_rgb_mae": args.max_foreground_rgb_mae,
+            "max_changed_pixel_fraction": args.max_changed_pixel_fraction,
+            "changed_pixel_delta": args.changed_pixel_delta,
         },
+        "render_provenance": render_provenance,
+        "gate_mode": "strict-identical" if args.strict_identical else "standard",
         "text_source": text_source,
+        "text_inventory_spec": str(Path(args.spec).expanduser().resolve()) if args.spec else None,
         "problems": problems,
         "passed": not problems,
         "next_actions": [
@@ -413,6 +538,7 @@ def main() -> int:
     parser.add_argument("--report", required=True)
     parser.add_argument("--layout", default=None, help="solve_text_metrics.py output, for text-level checks")
     parser.add_argument("--manifest", default=None, help="page manifest.json, for text-level checks")
+    parser.add_argument("--spec", default=None, help="figure_spec.json, for strict exact-text inventory coverage")
     parser.add_argument("--width", type=int, default=None, help="normalised comparison width (default: reference width)")
     parser.add_argument("--height", type=int, default=None, help="normalised comparison height (default: reference height)")
     parser.add_argument("--tile", type=int, default=64)
@@ -427,6 +553,8 @@ def main() -> int:
                         help="solve margin at or above which a shape-only text difference is recorded as font substitution")
     parser.add_argument("--fail-on-recorded-differences", action="store_true",
                         help="treat recorded font-substitution differences as gate failures")
+    parser.add_argument("--fail-on-low-confidence", action="store_true",
+                        help="treat skipped low-confidence text checks as failures")
     parser.add_argument("--ink-tolerance-px", type=int, default=1, help="registration tolerance for the ink-loss channel")
     parser.add_argument("--min-text-ink-iou", type=float, default=DEFAULT_MIN_TEXT_INK_IOU)
     parser.add_argument("--max-text-offset-px", type=float, default=DEFAULT_MAX_TEXT_OFFSET_PX)
@@ -436,8 +564,39 @@ def main() -> int:
     parser.add_argument("--text-margin-px", type=int, default=2)
     parser.add_argument("--align-shift", type=int, default=3)
     parser.add_argument("--max-repair-targets", type=int, default=20)
+    parser.add_argument("--max-rgb-mae", type=float, default=1.0)
+    parser.add_argument("--max-foreground-rgb-mae", type=float, default=1.0)
+    parser.add_argument("--changed-pixel-delta", type=float, default=12.0)
+    parser.add_argument("--max-changed-pixel-fraction", type=float, default=1.0)
+    parser.add_argument("--require-no-repair-targets", action="store_true")
+    parser.add_argument("--render-provenance", help="wps-render-provenance.json from scripts/wps_export.py")
+    parser.add_argument("--require-wps-render", action="store_true")
+    parser.add_argument(
+        "--strict-identical",
+        action="store_true",
+        help="apply the benchmark gate: WPS provenance, strict text/font checks, colour checks, and zero repair targets",
+    )
     parser.add_argument("--advisory", action="store_true", help="always exit 0 (diagnostic use only)")
     args = parser.parse_args()
+
+    if args.strict_identical:
+        args.min_ssim = 0.995
+        args.bad_tile_ssim = 0.97
+        args.max_bad_tile_fraction = 0.0
+        args.max_missing_ink_fraction = 0.0
+        args.min_text_ink_iou = 0.90
+        args.max_text_offset_px = 1.0
+        args.max_text_size_ratio_delta = 0.03
+        args.max_content_offset_px = 1.0
+        args.max_content_scale_delta = 0.003
+        args.max_rgb_mae = 0.006
+        args.max_foreground_rgb_mae = 0.025
+        args.max_changed_pixel_fraction = 0.01
+        args.changed_pixel_delta = 8.0
+        args.fail_on_recorded_differences = True
+        args.fail_on_low_confidence = True
+        args.require_no_repair_targets = True
+        args.require_wps_render = True
 
     report = compare(
         Path(args.reference).expanduser().resolve(),

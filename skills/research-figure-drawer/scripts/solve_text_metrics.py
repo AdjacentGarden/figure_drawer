@@ -95,13 +95,14 @@ def discover_fonts(font_dirs: list[Path], families: list[str] | None, include_al
     for directory in font_dirs:
         if not directory.is_dir():
             continue
-        for path in sorted(directory.iterdir()):
-            if path.suffix.lower() not in {".ttf", ".otf", ".ttc"} or path.name.lower() in seen:
+        for path in sorted(directory.rglob("*")):
+            identity = str(path.resolve()).lower()
+            if path.suffix.lower() not in {".ttf", ".otf", ".ttc"} or identity in seen:
                 continue
             stem = path.stem.lower()
             if wanted is not None and not any(name in stem for name in wanted):
                 continue
-            seen.add(path.name.lower())
+            seen.add(identity)
             try:
                 family, style = ImageFont.truetype(str(path), 20).getname()
             except Exception:

@@ -21,7 +21,7 @@ Evaluate the result in four layers.
 - Body labels meet the configured minimum font size; micro-annotations remain a minority and meet their separate minimum.
 - Raster assets meet the configured effective DPI at their placed size.
 - Simple icons and formulas marked as vector-required are SVG, EMF, or native PowerPoint objects.
-- The fidelity gate passes: global and per-tile SSIM, content-extent alignment, no tile lost source ink, and no text box reported `missing_text`, `misaligned`, or `size_mismatch`.
+- The reopened WPS export is compared with the target. Require the strict numerical gate only for `pixel-identical` mode. For `perceptual-95-blind`, use those metrics to locate repair targets; five independent 95/100-or-higher judgments and inability to identify the original form the perceptual gate. Neither mode waives scientific topology, readable labels, or editability.
 
 ## Raster input
 
@@ -44,7 +44,7 @@ For screenshot or flattened-image input, text geometry is measured, not estimate
 
 - Titles, labels, group headings, and annotations are native PowerPoint text.
 - Structural containers, ordinary lines, arrows, paths, and tables are native objects when supported.
-- Complex icons or illustrations are independent movable assets with recorded provenance.
+- Complex icons or illustrations are independent movable assets with recorded provenance. Photographs in paper figures may be isolated as separate replaceable raster objects; do not include adjacent labels, borders, filmstrip rails or arrows in those crops.
 - Formulas are independent LaTeX-rendered assets unless native equation support is explicitly implemented.
 - No full-slide raster is used as a hidden or visible substitute for editable reconstruction.
 
@@ -52,10 +52,12 @@ For screenshot or flattened-image input, text geometry is measured, not estimate
 
 - `editppt` page and deck validation pass.
 - The scientific validation script passes.
-- The final PPTX opens and contains exactly one slide for one requested figure.
+- The final PPTX opens in WPS, survives save/reopen, and contains exactly one slide for one requested figure.
 - A rendered preview has been compared with the accepted reference.
 - `quality-audit.json` passes and `render-comparison.json` records the reference-versus-final diagnostic metrics.
-- When the gate ran against raster input, `render-comparison.json` reports `passed: true` with the thresholds that were applied; an advisory-only run does not satisfy this condition.
+- In pixel-identity mode, `render-comparison.json` must pass the strict gate. In reference-guided perceptual mode, retain diagnostic comparison metrics, five raw verdicts and the aggregate perceptual-gate report; never label diagnostic SSIM as a human similarity percentage.
 - The run preserves `figure_spec.json`, prompt, reference image, validation reports, and final artifacts.
 
-Minor antialiasing, font-metric, or image-asset edge differences may be recorded as warnings. Scientific mismatches, missing labels, broken topology, and fake editability are failures.
+Minor antialiasing differences may be recorded for normal delivery. They are failures in `--strict-identical` benchmark mode. Scientific mismatches, missing labels, broken topology, unverified WPS rendering, and fake editability are always failures. A failed blind round remains a failure even when the picture looks broadly similar to the author.
+
+Run `audit_pptx_editability.py` against the final OOXML. Strict runs reject a single large picture, tiled page images, off-slide or hidden shape padding, missing expected native text, and insufficient in-bounds native-object coverage. Vector pictures remain picture objects and do not satisfy native-editability coverage.

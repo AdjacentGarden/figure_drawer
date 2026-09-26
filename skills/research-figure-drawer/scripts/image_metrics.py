@@ -10,6 +10,7 @@ with the manifest's `box_px` contract.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -210,12 +211,16 @@ def ssim(reference: np.ndarray, rendered: np.ndarray, kernel: np.ndarray | None 
 
 
 def tile_grid(score_map: np.ndarray, tile: int) -> np.ndarray:
-    """Mean of each `tile` x `tile` block, cropped to whole blocks."""
+    """Mean of each block, including partial tiles at the right/bottom edges."""
     height, width = score_map.shape
-    rows = max(1, height // tile)
-    cols = max(1, width // tile)
-    trimmed = score_map[: rows * tile, : cols * tile]
-    return trimmed.reshape(rows, tile, cols, tile).mean(axis=(1, 3))
+    rows = max(1, math.ceil(height / tile))
+    cols = max(1, math.ceil(width / tile))
+    result = np.empty((rows, cols), dtype=np.float64)
+    for row in range(rows):
+        for col in range(cols):
+            block = score_map[row * tile:min(height, (row + 1) * tile), col * tile:min(width, (col + 1) * tile)]
+            result[row, col] = float(block.mean())
+    return result
 
 
 def boxes_from_tiles(tile_scores: np.ndarray, tile: int, threshold: float) -> list[dict]:
@@ -224,12 +229,16 @@ def boxes_from_tiles(tile_scores: np.ndarray, tile: int, threshold: float) -> li
 
 
 def tile_sums(mask: np.ndarray, tile: int) -> np.ndarray:
-    """Sum of True pixels per `tile` x `tile` block, cropped to whole blocks."""
+    """Sum of True pixels per block, including partial edge tiles."""
     height, width = mask.shape
-    rows = max(1, height // tile)
-    cols = max(1, width // tile)
-    trimmed = mask[: rows * tile, : cols * tile].astype(np.int64)
-    return trimmed.reshape(rows, tile, cols, tile).sum(axis=(1, 3))
+    rows = max(1, math.ceil(height / tile))
+    cols = max(1, math.ceil(width / tile))
+    result = np.zeros((rows, cols), dtype=np.int64)
+    for row in range(rows):
+        for col in range(cols):
+            block = mask[row * tile:min(height, (row + 1) * tile), col * tile:min(width, (col + 1) * tile)]
+            result[row, col] = int(block.sum())
+    return result
 
 
 def boxes_from_bad_grid(bad: np.ndarray, tile: int, severity: np.ndarray) -> list[dict]:

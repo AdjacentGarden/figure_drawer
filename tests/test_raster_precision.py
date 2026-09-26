@@ -28,8 +28,15 @@ SCRIPTS = SKILL / "scripts"
 SOLVER = SCRIPTS / "solve_text_metrics.py"
 GATE = SCRIPTS / "compare_renders.py"
 
-WINDOWS_FONTS = Path(r"C:\Windows\Fonts")
-ARIAL = WINDOWS_FONTS / "arial.ttf"
+FONT_CANDIDATES = [
+    Path(r"C:\Windows\Fonts\arial.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+    Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+]
+TEST_FONT = next((path for path in FONT_CANDIDATES if path.is_file()), FONT_CANDIDATES[0])
+FONT_DIR = TEST_FONT.parent
+FONT_FAMILY_FILTER = TEST_FONT.stem.split("-")[0].lower()
 SOURCE_SIZE = (1280, 720)
 SLIDE = (13.3333, 7.5)
 # 1280 px across 13.3333 in = 96 px per inch, so the builder's preview at
@@ -50,9 +57,9 @@ def load_module(name: str, path: Path):
 
 
 def require_font() -> Path:
-    if not ARIAL.is_file():
-        raise unittest.SkipTest("Arial is required for the raster-precision tests")
-    return ARIAL
+    if not TEST_FONT.is_file():
+        raise unittest.SkipTest("Arial, Liberation Sans, or DejaVu Sans is required for the raster-precision tests")
+    return TEST_FONT
 
 
 def paste_text(
@@ -126,9 +133,9 @@ def run_solver(directory: Path, image: Path, hints: Path, out_name: str = "solve
             "--out",
             str(report),
             "--font-dir",
-            str(WINDOWS_FONTS),
+            str(FONT_DIR),
             "--families",
-            "arial",
+            FONT_FAMILY_FILTER,
             "--slide",
             f"{SLIDE[0]}x{SLIDE[1]}",
         ],
@@ -178,7 +185,7 @@ class SolverTests(unittest.TestCase):
             self.assertEqual(len(solved["text_boxes"]), 3)
             for (text, size_px, _target), record, manifest_box in zip(items, solved["items"], solved["text_boxes"]):
                 self.assertEqual(record["text"], text)
-                self.assertIn("Arial", record["font"])
+                self.assertTrue(Path(record["font_file"]).is_file())
                 self.assertLessEqual(
                     abs(record["font_size_px"] - size_px),
                     1.0,
@@ -290,6 +297,52 @@ class BandRegressionTests(unittest.TestCase):
 
 
 class GateTests(unittest.TestCase):
+    def test_partial_edge_tiles_are_not_discarded(self):
+        metrics = load_module("image_metrics_edge_tiles", SCRIPTS / "image_metrics.py")
+        scores = np.ones((65, 65), dtype=np.float64)
+        scores[64, 64] = 0.0
+        grid = metrics.tile_grid(scores, 64)
+        self.assertEqual(grid.shape, (2, 2))
+        self.assertEqual(grid[1, 1], 0.0)
+        mask = np.zeros((65, 65), dtype=bool)
+        mask[64, 64] = True
+        sums = metrics.tile_sums(mask, 64)
+        self.assertEqual(sums.shape, (2, 2))
+        self.assertEqual(int(sums[1, 1]), 1)
+
+    def test_strict_gate_rejects_same_luma_wrong_colour(self):
+        with scratch_dir("same-luma-colour") as directory:
+            reference = Image.new("RGB", (400, 200), (255, 255, 255))
+            rendered = reference.copy()
+            ImageDraw.Draw(reference).rectangle([40, 30, 360, 170], fill=(255, 0, 0))
+            ImageDraw.Draw(rendered).rectangle([40, 30, 360, 170], fill=(0, 130, 0))
+            reference_path = directory / "reference.png"
+            rendered_path = directory / "rendered.png"
+            reference.save(reference_path)
+            rendered.save(rendered_path)
+            import hashlib
+            provenance = directory / "wps.json"
+            provenance.write_text(
+                json.dumps({
+                    "passed": True,
+                    "renderer": "WPS Presentation COM",
+                    "reopened_exports": [{
+                        "path": str(rendered_path),
+                        "sha256": hashlib.sha256(rendered_path.read_bytes()).hexdigest(),
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            code, report = run_gate(
+                reference_path,
+                rendered_path,
+                directory / "report.json",
+                extra=["--strict-identical", "--render-provenance", str(provenance)],
+            )
+            self.assertEqual(code, 1)
+            self.assertFalse(report["passed"])
+            self.assertTrue(any("RGB MAE" in problem for problem in report["problems"]), report["problems"])
+
     def test_identical_render_passes_the_gate(self):
         items = [("Exact Match", 22, (120, 90))]
         with scratch_dir("identical") as directory:

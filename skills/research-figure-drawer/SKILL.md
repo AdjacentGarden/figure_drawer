@@ -1,26 +1,29 @@
 ---
 name: research-figure-drawer
-description: Create publication-ready scientific architecture, method, workflow, and conceptual figures from LaTeX/TikZ or research descriptions by using the GPT client's built-in image generation, then rebuilding the result as an object-level editable PowerPoint with the reconstruction runtime bundled in this skill. Use for CVPR, NeurIPS, ICLR, ACL, ICML, and similar paper figures; not for data plots or ordinary slide decks.
+description: Create or reconstruct publication-ready scientific architecture, method, workflow, and mechanism figures as object-level editable PPTX, including WPS-native reference-guided reconstruction and LaTeX/TikZ input. Use for CVPR, NeurIPS, ICLR, ACL, ICML, ICCV and similar ML paper figures; not for data plots or ordinary slide decks.
 ---
 
 # Research Figure Drawer
 
-Turn scientific content into two coordinated deliverables:
+Turn scientific content or a published mechanism figure into two coordinated deliverables: a documented visual reference and a validated, object-level editable `.pptx`. Choose the reference and reconstruction route from the evidence:
 
-1. a polished reference PNG generated with the GPT/Codex client's built-in `image_gen.imagegen` tool; and
-2. a validated, object-level editable `.pptx` reconstructed with the reference-guided hybrid workflow, driven by the `editppt` reconstruction runtime that is bundled in this skill at `cli/`.
+1. Complete TikZ/PGF geometry: compile deterministically, then reconstruct native slide objects.
+2. Semantic description without fixed geometry: generate a visual proposal with the client's built-in `image_gen.imagegen` tool, then use the bundled `editppt` hybrid reconstruction runtime at `cli/`.
+3. Published figure visible as a reference: reconstruct with live WPS Presentation text, shapes and connectors using `scripts/wps_native_builder.py`; use isolated photos/icons only where needed.
 
-The structured scientific specification is authoritative. Generated pixels are a visual proposal, never a source of scientific facts.
+The structured scientific specification is authoritative. Generated pixels are a visual proposal, never a source of scientific facts. When the input already contains complete TikZ/PGF geometry, compile it deterministically instead of asking an image model to redraw it.
 
-This skill is self-contained: it does not require the separate `image-to-editable-ppt` skill, nor any network fetch of its code. The reconstruction runtime, its contract, its references, and its page-worker template ship inside this skill directory and are pinned to an upstream commit (see `cli/VENDOR.json`).
+This skill is self-contained: it does not require the separate `image-to-editable-ppt` skill, nor any network fetch of its code. The hybrid reconstruction runtime, its contract, its references, and its page-worker template ship inside this skill directory and are pinned to an upstream commit (see `cli/VENDOR.json`). The native WPS route additionally needs Windows WPS Presentation and `pywin32`.
+
+For an existing published figure, declare the evaluation task before drawing: **unseen TeX reconstruction** (gold image withheld) or **reference-guided image-to-editable-PPT reconstruction** (published image visible). The latter is appropriate for complex figures whose TeX only contains an external-image placeholder. Never report a reference-guided result as TeX-only generation. Also choose `pixel-identical` or `perceptual-95-blind` acceptance up front.
 
 ## Prerequisites
 
-Before work begins:
+Before work begins, select the renderer from the source type. The following image-generation/editppt prerequisites apply only to the semantic-generation or hybrid reconstruction route; a reference-guided **native WPS** reconstruction uses the WPS prerequisites described below instead:
 
 1. Run `python3 scripts/check_environment.py --strict` from this skill directory.
 2. Require the bundled `editppt` runtime at `<skill-root>/cli`. If `editppt --help` fails, install the bundled package (`python3 -m pip install -e <skill-root>/cli`) or use the bundled no-install launcher `python3 scripts/run_editppt.py --help`; the exact commands and dependency list are in [references/installation.md](references/installation.md). Do not substitute an unrelated installation of the same tool.
-3. Use the client's built-in `image_gen.imagegen` tool by default. It uses the signed-in GPT client account and does not require an API key. Do not claim it used a particular model ID because its interface does not expose a model selector.
+3. For a new figure from a semantic description, use the client's built-in `image_gen.imagegen` tool by default. It uses the signed-in GPT client account and does not require an API key. Do not claim it used a particular model ID because its interface does not expose a model selector. Do not generate a new aesthetic reference when the task is to reconstruct an existing published image.
 4. Use `editppt image generate --model gpt-image-2` only when the user explicitly requires the exact API model or the built-in image tool is unavailable and the user has already authorized API fallback.
 5. Treat LaTeX supplied by the user as content. Do not execute arbitrary TeX shell commands or `\write18` content.
 6. The workflow sends the figure prompt to the client's image service and may send the generated page to OCR/image services during editable reconstruction. If the user marks the material confidential or local-only, pause before external calls and explain that the requested image stage cannot be completed locally.
@@ -40,7 +43,52 @@ python3 scripts/init_figure_run.py \
 
 The command prints the run directory and creates the expected folders. Do not overwrite an earlier run.
 
-### 2. Establish the scientific source of truth
+### 2. Classify the TeX evidence before choosing a renderer
+
+Run:
+
+```bash
+python3 scripts/classify_tex_source.py \
+  --input <run>/request.md \
+  --report <run>/source-classification.json
+```
+
+The result has three actionable modes:
+
+- `deterministic-vector`: TikZ/PGF/PGFPlots geometry is present. Compile it with `scripts/compile_tex_reference.py`; do **not** send it through image generation.
+- `external-image-placeholder`: the TeX only names `\includegraphics` assets. Without those assets the original pixels are not recoverable. If a public published original is available and the request permits using it, use the explicitly labeled reference-guided route. Otherwise ask for the image when exact reconstruction is required, or label the result semantic-only.
+- `semantic-description`: the input contains concepts but no unique visual geometry. Image generation may propose a new figure, but it cannot honestly be evaluated as a pixel-identical reconstruction of an unseen original.
+
+Known file/system primitives produce `unsafe-tex`; do not compile them. Read [references/benchmark-protocol.md](references/benchmark-protocol.md) before making any exact-match claim.
+
+Real paper projects often contain unrelated `\input` and `\includegraphics` commands even when one target figure is self-contained. In that case isolate the target first:
+
+```bash
+python3 scripts/extract_tex_figure.py \
+  --input paper.tex \
+  --label fig:target \
+  --output <run>/target-figure.tex \
+  --report <run>/target-figure-extraction.json
+```
+
+The extractor copies safe drawing declarations from the preamble and hash-binds the slice to its source. Classify and compile the extracted file, never the unrelated whole paper.
+
+For deterministic vector input:
+
+```bash
+python3 scripts/compile_tex_reference.py \
+  --input <run>/request.md \
+  --out-dir <run>/reference \
+  --dpi 300
+```
+
+This uses Tectonic's untrusted mode and records compiler provenance. Continue directly to editable reconstruction from that reference. The resulting PDF is also the geometry source for vector/native-object conversion.
+
+For reference-guided reconstruction on a Windows WPS host, read [references/wps-native-reconstruction.md](references/wps-native-reconstruction.md). Draw the structure with live WPS text, shapes and connectors through `scripts/wps_native_builder.py`; keep photographic frames and genuinely complex motifs as small independent replaceable assets. Do not pass a published diagram through image generation, embed the entire original as a slide picture, or imply that the selected example tests unseen TeX generalization. Use `scripts/wps_export.py` to save, reopen and render the deck in WPS before auditing it.
+
+For a born-digital published PDF, inspect its text layer. `scripts/import_pdf_text_layer.py` can map measured spans into live WPS text objects; visually calibrate its PDF-to-WPS scale and font scale against the published crop, then correct individual labels that still wrap or drift. This improves text fidelity without rasterizing the wording.
+
+### 3. Establish the scientific source of truth
 
 Read [references/figure-spec.md](references/figure-spec.md). Inspect the user's TeX/TikZ or method description, then complete `figure_spec.json` before generating an image.
 
@@ -54,7 +102,7 @@ Preserve exactly:
 
 Do not infer unsupported modules or fashionable architecture details. Record non-critical layout assumptions in `assumptions`; ask one concise question only when an ambiguity would change scientific meaning.
 
-### 3. Build and review the image prompt
+### 4. Build and review the image prompt (non-deterministic input only)
 
 Run:
 
@@ -66,7 +114,7 @@ python3 scripts/build_imagegen_prompt.py \
 
 For figure-type-specific decisions, read [references/visual-design.md](references/visual-design.md). The prompt must describe topology and exact labels, not merely a visual theme.
 
-### 4. Generate the reference with the client's built-in image tool
+### 5. Generate the reference with the client's built-in image tool (non-deterministic input only)
 
 Call `image_gen.imagegen` directly with the full contents of `<run>/imagegen-prompt.md` as `prompt`. This is a new image, so omit `referenced_image_paths` and `num_last_images_to_include`. Allow the tool the normal long image-generation timeout.
 
@@ -104,7 +152,7 @@ Inspect the generated image. Compare it against `figure_spec.json`, not just aga
 
 Allow no more than three full generations by default. Prefer a targeted image edit for a localized visual defect. If scientific correctness still fails, stop and report the mismatch instead of converting a knowingly incorrect figure.
 
-### 5. Rebuild the accepted image with reference-guided hybrid reconstruction
+### 6. Rebuild the accepted image with reference-guided hybrid reconstruction
 
 Read [references/hybrid-reconstruction.md](references/hybrid-reconstruction.md) and the bundled contract [references/reconstruction-contract.md](references/reconstruction-contract.md). The contract is the authoritative home for the `editppt` state machine, the manifest, build, provenance, and packaging rules; [references/cli-helper.md](references/cli-helper.md) holds the command syntax, and [references/manifest-schema.md](references/manifest-schema.md) with [references/page-decision-tree.md](references/page-decision-tree.md) hold the object-level field and decision contracts. The page-worker template is `prompts/page-worker.md` and its prompt builder is `scripts/build-page-worker-prompt.py`.
 
@@ -134,7 +182,11 @@ Use the accepted `<run>/reference/reference.png` as the single-page input. Keep 
 
 Do not bypass the contract workflow by placing the full reference PNG behind editable text. Do not manually mark a failed page as passed.
 
-### 6. Validate the scientific and editable result
+### 7. Validate the scientific and editable result
+
+For the native WPS route, follow [references/wps-native-reconstruction.md](references/wps-native-reconstruction.md): validate the manifest, build in WPS, reopen and export in WPS, run the actual PPTX editability audit, compare the reopened render with the original, and run the five-reviewer gate for the declared acceptance mode. Do not require an `editppt` page manifest or mark the hybrid-specific checks below as having run. Record the native builder, WPS export and blind-review reports instead.
+
+For the hybrid `editppt` route, continue with the commands below.
 
 After `editppt run finalize`, audit the reconstruction quality from the page manifest:
 
@@ -144,13 +196,24 @@ python3 scripts/audit_figure_quality.py \
   --report <run>/final/quality-audit.json
 ```
 
-Render the final PPTX and run the fidelity gate against the accepted reference:
+Render the final PPTX in the target Windows WPS Presentation, not with the bundled preview renderer. Copy `scripts/wps_export.py` to the Windows host and run:
+
+```powershell
+python scripts/wps_export.py --input final.pptx --out-dir wps-render --width 1920
+```
+
+The script opens the deck, exports it, saves a round-tripped copy, reopens that copy, exports again, and records the WPS version and hashes. Use `wps-render/reopened/slide-001.png` as the final render. The bundled Pillow preview is diagnostic only and can never satisfy the final visual gate.
+
+Then run the fidelity gate against the accepted reference:
 
 ```bash
 python3 scripts/compare_renders.py \
   --reference <run>/reference/reference.png \
-  --rendered <run>/final/final-preview.png \
+  --rendered <run>/final/wps-render/reopened/slide-001.png \
   --layout <page_dir>/text-solve.json \
+  --spec <run>/figure_spec.json \
+  --render-provenance <run>/final/wps-render-provenance.json \
+  --strict-identical \
   --report <run>/final/render-comparison.json
 ```
 
@@ -168,6 +231,10 @@ python3 scripts/validate_figure_run.py \
   --pptx <dependency-run>/final/<name>_edited.pptx \
   --editppt-validation <dependency-run>/final/validation.json \
   --quality-report <run>/final/quality-audit.json \
+  --render-comparison <run>/final/render-comparison.json \
+  --render-provenance <run>/final/wps-render-provenance.json \
+  --editability-report <run>/final/editability-report.json \
+  --strict-wps \
   --report <run>/final/figure-validation.json
 ```
 
@@ -178,22 +245,26 @@ Required acceptance conditions:
 - bundled runtime validation passed;
 - one-slide PPTX opens successfully;
 - all required exact labels are present as native text or native table-cell text;
-- the rendered page matches the accepted reference's composition;
+- the WPS-rendered, reopened page satisfies the declared acceptance mode: strict numerical gate for pixel identity, or five-of-five `perceptual-95-blind` judgments for reference-guided perceptual parity;
 - the structure matches `figure_spec.json`;
 - the quality audit passes, including configured minimum font size, raster DPI, vector-formula, and explicitly vector-required icon checks;
 - no important arrow crosses text or terminates ambiguously;
 - the final PPTX does not contain the full reference image as a fake editable background.
 
-### 7. Deliver
+Before strict validation, run `scripts/audit_pptx_editability.py` on the final PPTX. Pass the spec's exact labels with repeated `--expected-text`, and tune minimum native-object/text counts from the spec rather than using one count for every figure. SVG/EMF/WMF picture objects do not count as native editable content.
 
-Return:
+For a published-paper benchmark, compare the WPS render directly with the published original. In unseen-TeX mode the gold image stays withheld from construction; in reference-guided mode it is the declared input. Run the five-reviewer blind protocol in [references/benchmark-protocol.md](references/benchmark-protocol.md). Pixel identity requires five `identical: true` verdicts plus strict automatic gates. Perceptual parity requires each of five independent reviewers to score at least 95/100 and report that they cannot reliably tell which is original; diagnostic SSIM is not interchangeable with this score.
+
+### 8. Deliver
+
+Return the route-specific evidence and:
 
 - editable PPTX;
 - accepted reference PNG;
 - rendered final preview;
-- `figure_spec.json`;
-- `figure-validation.json`;
-- `quality-audit.json` and `render-comparison.json`;
+- WPS render provenance and round-trip render;
+- `figure_spec.json` or the native WPS object manifest;
+- route-specific validation, editability, comparison and blind-review reports;
 - a concise list of any permitted visual differences.
 
 Do not describe embedded photos, separated icons, or rendered formulas as internally editable. State their actual editability accurately.
