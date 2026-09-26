@@ -94,24 +94,38 @@ def main() -> int:
     out_dir = Path(args.out_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     roundtrip = out_dir / "roundtrip.pptx"
-    app = None
-    first = None
-    try:
-        app = win32com.client.DispatchEx("KWPP.Application")
-        # Current WPS builds may reject hidden automation with E_UNEXPECTED.  A
-        # visible application window is more reliable and does not change exports.
-        app.Visible = True
-        version = str(getattr(app, "Version", "unknown"))
-        first = open_presentation(app, source, read_only=False)
-        slide_width = float(first.PageSetup.SlideWidth)
-        slide_height = float(first.PageSetup.SlideHeight)
-        export_height = args.height or max(1, round(args.width * slide_height / slide_width))
-        first_exports = export_slides(first, out_dir / "first-open", args.width, export_height)
-        first.SaveAs(str(roundtrip))
-        first.Close()
+    # A WPS process that has just finished a separate automation job can leave
+    # a short-lived COM registration proxy behind.  Retry the *initial* open as
+    # well as the later round-trip open so build -> export works in one command.
+    first_open_attempts = 0
+    last_error = None
+    for attempt in range(1, 4):
+        first_open_attempts = attempt
+        app = None
         first = None
-    finally:
-        close_wps(app, first)
+        try:
+            app = win32com.client.DispatchEx("KWPP.Application")
+            # Current WPS builds may reject hidden automation with E_UNEXPECTED.
+            # A visible window is more reliable and does not change exports.
+            app.Visible = True
+            version = str(getattr(app, "Version", "unknown"))
+            first = open_presentation(app, source, read_only=False)
+            slide_width = float(first.PageSetup.SlideWidth)
+            slide_height = float(first.PageSetup.SlideHeight)
+            export_height = args.height or max(1, round(args.width * slide_height / slide_width))
+            first_exports = export_slides(first, out_dir / "first-open", args.width, export_height)
+            first.SaveAs(str(roundtrip))
+            first.Close()
+            first = None
+            close_wps(app)
+            break
+        except Exception as exc:
+            last_error = exc
+            close_wps(app, first)
+            if attempt < 3:
+                time.sleep(2)
+    else:
+        raise RuntimeError("WPS initial open/export failed after 3 attempts") from last_error
 
     # Use a fresh WPS process for the reopen check.  This is both a stronger
     # round-trip test and avoids stale RPC state in long-running WPS sessions.
@@ -160,6 +174,7 @@ def main() -> int:
         "first_open_exports": first_exports,
         "reopened_exports": second_exports,
         "roundtrip_visual_stable": roundtrip_stable,
+        "first_open_attempts": first_open_attempts,
         "reopen_attempts": reopen_attempts,
         "passed": (
             slide_count > 0
